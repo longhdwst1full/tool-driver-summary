@@ -16,6 +16,7 @@
 | Quét | `scan.json`, `scan.md` | Cây thư mục, metadata, cặp video/phụ đề |
 | Trích nguồn | `transcripts/`, `documents/` | Văn bản và manifest trạng thái |
 | Bài học | `lesson-packs/` | Markdown + JSON theo schema `lesson_pack.SCHEMA` |
+| Đối chiếu nguồn | `cross-source/` | Cặp quote phụ đề/tài liệu, nhãn trùng/bổ sung/có thể mâu thuẫn |
 | Bài học tách file | `lesson-artifacts/` | Transcript, summary, deep notes, concepts, timeline, quiz, metadata |
 | Khóa học | `courses/` | Tóm tắt, bản đồ bài, đồ thị khái niệm, lộ trình, master notes, quiz |
 | QA | `qa-report.json` | Kiểm tra lại quote, ID nguồn, coverage |

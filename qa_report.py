@@ -31,8 +31,21 @@ def audit(packs: Path) -> dict:
                 "lesson": path.stem, "status": "review", "coverage": 0,
                 "errors": [str(exc)], "caveats": []})
     all_rows = [row for rows in courses.values() for row in rows]
+    comparisons = []
+    comparison_root = packs.parent / "cross-source"
+    if comparison_root.is_dir():
+        for path in sorted(comparison_root.rglob("*.json")):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                comparisons.append({"lesson": path.stem, "status": data.get("status", "needs_review"),
+                                    "matches": len(data.get("matches", [])),
+                                    "conflicts": sum(row.get("type") == "conflict" for row in data.get("matches", [])),
+                                    "caveats": data.get("caveats", [])})
+            except (OSError, ValueError):
+                comparisons.append({"lesson": path.stem, "status": "needs_review", "matches": 0,
+                                    "conflicts": 0, "caveats": ["Không đọc được báo cáo đối chiếu"]})
     return {"total": len(all_rows), "status": dict(Counter(row["status"] for row in all_rows)),
-            "courses": dict(courses),
+            "courses": dict(courses), "cross_source": comparisons,
             "manual_review": "Độ chính xác ngữ nghĩa, mâu thuẫn nguồn và tính dễ đọc cần người kiểm tra."}
 
 

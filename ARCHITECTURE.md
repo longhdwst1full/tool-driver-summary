@@ -9,7 +9,7 @@
 5. `chunking.py` chia phụ đề theo cửa sổ 5–8 phút và tài liệu theo đoạn văn, mỗi đoạn có `chunk_id` cố định để trích dẫn. `llm_client.py` gom lời gọi Codex CLI (`CodexCLIClient`) và prompt có version (`Prompt`); `codex_notes.py` dùng lại lớp này.
 6. `lesson_pack.py` tạo gói bài học (tóm tắt, khái niệm, timeline, ghi chú chi tiết, cần nhớ, quiz) từ một phụ đề. Mỗi ý có `quote` nguyên văn; kiểm tra tự động đối chiếu quote với chunk, đo coverage, cho Codex sửa tối đa 2 lần rồi đánh dấu `needs_review`. Tài liệu đọc được trong cùng thư mục với video được thêm làm nguồn phụ (tối đa 12.000 ký tự); coverage chỉ tính trên phụ đề. Kết quả ở `drive-reports/lesson-packs/` dạng `.md` và `.json`, xem được trên web (tab Ghi chú hoặc chi tiết video).
 7. `web_app.py` cung cấp API cục bộ và giao diện `web/` để duyệt dữ liệu, đọc kết quả và chạy các tác vụ cố định. Web chỉ mở file được liệt kê trong manifest; OAuth credentials và báo cáo thật đều nằm ngoài Git.
-8. `batch_lessons.py` chạy lần lượt các bài có phụ đề, dùng cache của `lesson_pack.py` để tiếp tục sau gián đoạn. `lesson_artifacts.py` xuất từng phần của bài QA `ok` thành bảy tệp theo đặc tả MVP. `course_synthesis.py` tổng hợp các bài QA `ok` thành sáu tệp cấp khóa, giữ ID nguồn và gắn cờ định nghĩa có thể mâu thuẫn.
+8. `batch_lessons.py` chạy lần lượt các bài có phụ đề, dùng cache của `lesson_pack.py` để tiếp tục sau gián đoạn. `lesson_artifacts.py` xuất từng phần của bài QA `ok` thành bảy tệp theo đặc tả MVP. `cross_source.py` đối chiếu phụ đề và tài liệu với quote hai phía, phân loại trùng/bổ sung/có thể mâu thuẫn. `course_synthesis.py` tổng hợp các bài QA `ok` thành sáu tệp cấp khóa, giữ ID nguồn và gắn cờ định nghĩa có thể mâu thuẫn.
 9. `qa_report.py` kiểm toán lại trích dẫn và độ phủ của mọi gói bài học. `knowledge_search.py` lập chỉ mục MongoDB khi có `MONGODB_URI`, hoặc SQLite FTS5 trong demo cục bộ, từ chunk của bài QA `ok`; tìm kiếm hoặc gửi nguồn truy xuất cho Codex CLI trả lời có trích dẫn. `notebook_export.py` chuẩn bị gói Markdown để người dùng nhập vào NotebookLM. `finalize_pipeline.py` chạy các bước tạo đầu ra cuối theo thứ tự.
 
 ## Các giai đoạn
@@ -23,6 +23,7 @@
 | Trạng thái nguồn của video (`caption_file` / `asr_ready` / `no_source`), chia đoạn, lớp LLM | Hoàn thành |
 | Gói bài học có dẫn nguồn và kiểm tra tự động | Hoàn thành 26/26 bài có phụ đề riêng; QA 26/26 `pass` |
 | Web duyệt theo khóa học/chương và xem Markdown | Hoàn thành |
+| Đối chiếu nhiều nguồn trong một bài | Đã có báo cáo có quote hai phía cho 4 bài có tài liệu đi kèm; các cờ mâu thuẫn cần người xem lại |
 | Tổng hợp nhiều bài thành kiến thức cấp khóa | Hoàn thành trên 26 bài QA `ok`; 118 khái niệm, 115 câu quiz |
 | Trích văn bản PPTX | Đã triển khai; thư mục quét hiện không có PPTX để thử trực tiếp |
 | OCR cho PDF chứa ảnh | Đã triển khai và chạy trên 3 PDF ảnh; toàn bộ 33 tài liệu học đã đọc được |

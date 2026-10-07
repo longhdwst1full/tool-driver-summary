@@ -90,9 +90,12 @@ Script tự tìm Codex CLI trong tiện ích VS Code nếu lệnh `codex` không
 python3 lesson_pack.py --id ID_FILE_PHU_DE_TU_MANIFEST
 python3 batch_lessons.py
 python3 lesson_artifacts.py
+python3 cross_source.py
 ```
 
 Kết quả Markdown và JSON nằm trong `drive-reports/lesson-packs/` theo tên khóa/chương/bài. `lesson_artifacts.py` tách các bài QA `ok` thành `transcript.md`, `summary.md`, `deep_notes.md`, `concepts.json`, `timeline.json`, `quiz.json`, `metadata.json` trong `drive-reports/lesson-artifacts/`. Chạy lại cùng nguồn sẽ dùng bản đã có; `--refresh` tạo lại và `--rerender` chỉ dựng lại Markdown từ JSON đã lưu. Chức năng này dùng phiên đăng nhập Codex CLI hiện tại và chỉ áp dụng cho bài có file phụ đề riêng.
+
+`cross_source.py` đối chiếu phụ đề với tài liệu đi kèm của cùng bài, phân loại nội dung trùng, bổ sung và có thể mâu thuẫn. Mỗi cặp phải có quote nguyên văn từ cả hai phía; báo cáo ở `drive-reports/cross-source/` và được kiểm kê riêng trong `qa-report.json`. Cờ mâu thuẫn là điểm cần người học kiểm tra, chưa phải kết luận hai nguồn chắc chắn sai nhau.
 
 ## Tổng hợp khóa học, tìm kiếm và NotebookLM
 

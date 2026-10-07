@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 
-STEPS = (("QA", "qa_report.py"), ("Bài học", "lesson_artifacts.py"),
+STEPS = (("Đối chiếu nguồn", "cross_source.py"), ("QA", "qa_report.py"), ("Bài học", "lesson_artifacts.py"),
          ("Khóa học", "course_synthesis.py"), ("Tìm kiếm", "knowledge_search.py", "build"),
          ("NotebookLM", "notebook_export.py"))
 
@@ -22,7 +22,7 @@ def main() -> int:
         results.append({"step": name, "exit_code": run.returncode,
                         "output": run.stdout.strip() or run.stderr.strip()})
         print(f"{name}: {'ok' if run.returncode == 0 else 'cần xem lại'}", flush=True)
-        if run.returncode not in (0, 2) or (run.returncode == 2 and script != "qa_report.py"):
+        if run.returncode not in (0, 2) or (run.returncode == 2 and script not in ("qa_report.py", "cross_source.py")):
             break
     print(json.dumps(results, ensure_ascii=False, indent=2))
     return 0 if all(row["exit_code"] == 0 for row in results) else 2
