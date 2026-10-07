@@ -19,7 +19,7 @@
 | Bài học tách file | `lesson-artifacts/` | Transcript, summary, deep notes, concepts, timeline, quiz, metadata |
 | Khóa học | `courses/` | Tóm tắt, bản đồ bài, đồ thị khái niệm, lộ trình, master notes, quiz |
 | QA | `qa-report.json` | Kiểm tra lại quote, ID nguồn, coverage |
-| Tìm kiếm | `knowledge.sqlite` | Bảng ảo SQLite FTS5 `chunks` |
+| Tìm kiếm | MongoDB `source_chunks` hoặc `knowledge.sqlite` cục bộ | Chỉ mục đoạn nguồn từ bài QA `ok` |
 | NotebookLM | `notebooklm-export/` | Markdown và manifest để nhập thủ công |
 
 `lesson_pack.SCHEMA` yêu cầu `summary`, `objectives`, `concepts`, `steps`, `timeline`, `sections`, `must_remember`, `quiz`, `caveats`. Mọi khái niệm, bước, mục ghi chú, điều cần nhớ và câu hỏi có `source_refs` gồm `chunk_id` và quote nguyên văn. JSON bài học còn giữ `chunks`, `qa`, `meta` để kiểm tra lại và tái tạo đầu ra. Phiên bản prompt nằm trong `meta.prompt_id`; nguồn và prompt không đổi thì không gọi lại mô hình.

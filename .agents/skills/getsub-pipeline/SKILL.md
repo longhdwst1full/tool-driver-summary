@@ -17,7 +17,7 @@ Use the relevant modules below to trace a change from its input to its generated
 | Codex CLI and versioned prompts | `llm_client.py` | Structured model results |
 | Short AI notes and cited lesson packs | `codex_notes.py`, `lesson_pack.py` | `ai-notes/`, `lesson-packs/` |
 | Batch, separate lesson artifacts and QA audit | `batch_lessons.py`, `lesson_artifacts.py`, `qa_report.py` | `lesson-artifacts/`, `qa-report.json` |
-| Course synthesis, retrieval and NotebookLM export | `course_synthesis.py`, `knowledge_search.py`, `notebook_export.py`, `finalize_pipeline.py` | `courses/`, `knowledge.sqlite`, `notebooklm-export/` |
+| Course synthesis, retrieval and NotebookLM export | `course_synthesis.py`, `knowledge_search.py`, `mongo_search.py`, `notebook_export.py`, `finalize_pipeline.py` | `courses/`, MongoDB or `knowledge.sqlite`, `notebooklm-export/` |
 | Course index and local UI | `study_pack.py`, `web_app.py`, `web/` | `study-notes/index.md`, browser views |
 
 ## Preserve these relationships
@@ -29,5 +29,6 @@ Use the relevant modules below to trace a change from its input to its generated
 - `lesson_pack.py` checks verbatim quotes and caption coverage. A saved pack may have QA status `needs_review`; do not present that as a verified pack.
 - Course synthesis, search indexing and NotebookLM export only use lesson packs with QA status `ok`. Rebuild their outputs after a batch finishes.
 - Keep `credentials.json`, `token.json`, and contents of `drive-reports/` out of Git and out of logs. The local UI uses an action whitelist in `web_app.command_for`.
+- MongoDB credentials come from `MONGODB_URI` only; do not paste URI into files, command arguments, logs, or responses. The SQLite backend remains for offline demos.
 
 Run the affected tests with `python3 -m unittest discover -s tests -q`. Live Drive and Codex CLI runs use private data or an authenticated session, so run those only when the user's task requires them.

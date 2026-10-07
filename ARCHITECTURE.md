@@ -10,7 +10,7 @@
 6. `lesson_pack.py` tạo gói bài học (tóm tắt, khái niệm, timeline, ghi chú chi tiết, cần nhớ, quiz) từ một phụ đề. Mỗi ý có `quote` nguyên văn; kiểm tra tự động đối chiếu quote với chunk, đo coverage, cho Codex sửa tối đa 2 lần rồi đánh dấu `needs_review`. Tài liệu đọc được trong cùng thư mục với video được thêm làm nguồn phụ (tối đa 12.000 ký tự); coverage chỉ tính trên phụ đề. Kết quả ở `drive-reports/lesson-packs/` dạng `.md` và `.json`, xem được trên web (tab Ghi chú hoặc chi tiết video).
 7. `web_app.py` cung cấp API cục bộ và giao diện `web/` để duyệt dữ liệu, đọc kết quả và chạy các tác vụ cố định. Web chỉ mở file được liệt kê trong manifest; OAuth credentials và báo cáo thật đều nằm ngoài Git.
 8. `batch_lessons.py` chạy lần lượt các bài có phụ đề, dùng cache của `lesson_pack.py` để tiếp tục sau gián đoạn. `lesson_artifacts.py` xuất từng phần của bài QA `ok` thành bảy tệp theo đặc tả MVP. `course_synthesis.py` tổng hợp các bài QA `ok` thành sáu tệp cấp khóa, giữ ID nguồn và gắn cờ định nghĩa có thể mâu thuẫn.
-9. `qa_report.py` kiểm toán lại trích dẫn và độ phủ của mọi gói bài học. `knowledge_search.py` lập chỉ mục SQLite FTS5 từ chunk của bài QA `ok`, tìm kiếm hoặc gửi nguồn truy xuất cho Codex CLI trả lời có trích dẫn. `notebook_export.py` chuẩn bị gói Markdown để người dùng nhập vào NotebookLM. `finalize_pipeline.py` chạy các bước tạo đầu ra cuối theo thứ tự.
+9. `qa_report.py` kiểm toán lại trích dẫn và độ phủ của mọi gói bài học. `knowledge_search.py` lập chỉ mục MongoDB khi có `MONGODB_URI`, hoặc SQLite FTS5 trong demo cục bộ, từ chunk của bài QA `ok`; tìm kiếm hoặc gửi nguồn truy xuất cho Codex CLI trả lời có trích dẫn. `notebook_export.py` chuẩn bị gói Markdown để người dùng nhập vào NotebookLM. `finalize_pipeline.py` chạy các bước tạo đầu ra cuối theo thứ tự.
 
 ## Các giai đoạn
 
@@ -27,7 +27,7 @@
 | Trích văn bản PPTX | Đã triển khai; thư mục quét hiện không có PPTX để thử trực tiếp |
 | OCR cho PDF chứa ảnh | Đã triển khai và chạy trên 3 PDF ảnh; toàn bộ 33 tài liệu học đã đọc được |
 | Gói xuất NotebookLM | Đã xuất 29 tệp Markdown và link 2 tài liệu gốc; nhập lên NotebookLM do người dùng thực hiện |
-| Tìm kiếm và hỏi đáp có dẫn nguồn | Đã lập chỉ mục SQLite FTS5 với 79 đoạn nguồn; hỏi đáp Codex CLI đã thử với trích dẫn hợp lệ |
+| Tìm kiếm và hỏi đáp có dẫn nguồn | Đã lập chỉ mục SQLite FTS5 với 79 đoạn nguồn và thử hỏi đáp có trích dẫn hợp lệ; backend MongoDB đã có code, chờ URI mới sau khi đổi mật khẩu |
 | ASR cho video tải được | Chưa triển khai; video trong thư mục hiện tại đều bị chủ sở hữu tắt quyền tải |
 | Transcript nhúng trong trình phát Drive và video không có file phụ đề riêng | Chưa được Drive API v3 cung cấp trực tiếp |
 

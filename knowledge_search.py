@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
 
 from course_synthesis import collect_lessons
 from llm_client import CodexCLIClient, Prompt, find_codex
+from mongo_search import build_mongo_index, search_mongo
 
 
 ANSWER_PROMPT = Prompt("knowledge_answer", "1", """\
@@ -84,15 +86,20 @@ def main() -> int:
     parser.add_argument("query", nargs="?")
     parser.add_argument("--packs", type=Path, default=Path("drive-reports/lesson-packs"))
     parser.add_argument("--db", type=Path, default=Path("drive-reports/knowledge.sqlite"))
+    parser.add_argument("--backend", choices=("auto", "sqlite", "mongo"), default="auto",
+                        help="auto dùng MongoDB khi có MONGODB_URI, ngược lại dùng SQLite")
     parser.add_argument("--course")
     parser.add_argument("--limit", type=int, default=8)
     args = parser.parse_args()
+    backend = ("mongo" if os.environ.get("MONGODB_URI") else "sqlite") if args.backend == "auto" else args.backend
     if args.command == "build":
-        print(json.dumps(build_index(args.packs, args.db), ensure_ascii=False))
+        result = build_mongo_index(args.packs) if backend == "mongo" else build_index(args.packs, args.db)
+        print(json.dumps(result, ensure_ascii=False))
         return 0
     if not args.query:
         parser.error("Cần nhập câu hỏi hoặc từ khóa")
-    hits = search(args.db, args.query, args.limit, args.course)
+    hits = (search_mongo(args.query, args.limit, args.course) if backend == "mongo"
+            else search(args.db, args.query, args.limit, args.course))
     result = hits if args.command == "search" else answer(CodexCLIClient(find_codex()), args.query, hits)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
