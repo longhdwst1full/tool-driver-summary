@@ -1,0 +1,164 @@
+const initialView = ["overview", "videos", "documents", "notes", "activity"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "overview";
+const state = { library: null, jobs: [], token: "", view: initialView, query: "", course: "", hidePlaceholders: true, selected: null, lastJobs: "" };
+const main = document.querySelector("#main");
+const drawer = document.querySelector("#drawer");
+const backdrop = document.querySelector("#drawer-backdrop");
+const drawerContent = document.querySelector("#drawer-content");
+const labels = { overview: "Tổng quan", videos: "Video bài học", documents: "Tài liệu", notes: "Ghi chú", activity: "Hoạt động" };
+const jobLabels = { scan: "Quét lại Drive", captions: "Đọc phụ đề", documents: "Đọc tài liệu", note: "Tạo ghi chú AI" };
+
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+}
+function number(value) { return new Intl.NumberFormat("vi-VN").format(value || 0); }
+function duration(ms) { if (!ms) return "—"; const minutes = Math.floor(ms / 60000); return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`; }
+function bytes(value) { if (!value) return "—"; return value >= 1e6 ? `${(value / 1e6).toFixed(1)} MB` : `${Math.ceil(value / 1000)} KB`; }
+function safeUrl(url) { try { const parsed = new URL(url); return parsed.hostname === "drive.google.com" && parsed.protocol === "https:" ? parsed.href : "#"; } catch { return "#"; } }
+function toast(message) { const node = document.querySelector("#toast"); node.textContent = message; node.classList.add("show"); clearTimeout(toast.timer); toast.timer = setTimeout(() => node.classList.remove("show"), 4000); }
+
+async function api(url, options = {}) {
+  const response = await fetch(url, { cache: "no-store", ...options });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || `Lỗi HTTP ${response.status}`);
+  return data;
+}
+
+function metric(title, value, caption, icon) {
+  return `<article class="metric"><div class="metric-top"><span>${esc(title)}</span><span class="metric-icon">${icon}</span></div><strong>${number(value)}</strong><small>${esc(caption)}</small></article>`;
+}
+function pageHead(eyebrow, title, description, actions = "") {
+  return `<div class="page-heading"><div><div class="eyebrow">${esc(eyebrow)}</div><h1>${esc(title)}</h1><p>${esc(description)}</p></div>${actions ? `<div class="heading-actions">${actions}</div>` : ""}</div>`;
+}
+function statusTag(status) {
+  if (status === "ok") return `<span class="tag">● Đã đọc</span>`;
+  if (status === "needs_ocr") return `<span class="tag warn">◌ Cần OCR</span>`;
+  if (status === "too_large") return `<span class="tag warn">◌ Tệp lớn</span>`;
+  if (status === "error") return `<span class="tag warn">! Lỗi</span>`;
+  return `<span class="tag muted">Chưa xử lý</span>`;
+}
+
+function overview() {
+  const data = state.library;
+  const count = data.counts;
+  const featured = [...data.courses].sort((a, b) => b.videos - a.videos).slice(0, 6);
+  return `${pageHead("THƯ VIỆN HỌC TẬP", "Tổng quan nội dung", `Đã đồng bộ báo cáo từ thư mục “${data.folder.name || "Google Drive"}”.`)}
+    <section class="hero"><div class="hero-content"><span class="hero-label">BỘ SƯU TẬP CỦA BẠN</span><h2>Học tập có hệ thống, từ video đến ghi chú.</h2><p>Xem tiến độ đọc phụ đề, tài liệu và mở lại đúng nguồn cho từng bài học. Mọi tác vụ chỉ chạy khi bạn yêu cầu.</p></div><div class="hero-art" aria-hidden="true"><div class="sheet"></div><div class="sheet two"></div></div></section>
+    <div class="metric-grid">${metric("Video", count.video, "Trong thư mục và các thư mục con", "▷")}${metric("Tài liệu", count.document, `${data.processed.documents} đã trích văn bản`, "▤")}${metric("Phụ đề riêng", count.transcript, `${data.processed.captions} đã đọc`, "≋")}${metric("Ghi chú", data.notes.length, "Ghi chú AI và mẫu hiện có", "✦")}</div>
+    <div class="two-columns"><section class="panel"><div class="panel-header"><div><h3>Khóa học trong thư mục</h3><span>${data.courses.length} khóa có video hoặc tài liệu</span></div><button class="panel-link" data-view="videos">Xem video →</button></div>${featured.map((course, i) => `<div class="course-row"><span class="course-icon">${String(i + 1).padStart(2, "0")}</span><div class="course-info"><strong title="${esc(course.name)}">${esc(course.name)}</strong><small>${number(course.captions)} phụ đề · ${number(course.documents)} tài liệu</small></div><span class="count">${number(course.videos)} video</span></div>`).join("") || `<div class="empty-state">Chưa có báo cáo quét Drive.</div>`}</section>
+    <section class="panel"><div class="panel-header"><div><h3>Tiến độ xử lý</h3><span>Từ dữ liệu đã quét</span></div></div><div class="progress-block"><div class="progress-row"><div class="progress-label"><span>Video có phụ đề riêng đã đọc</span><strong>${number(data.processed.captions)} / ${number(count.video)}</strong></div><progress class="progress-meter" value="${data.processed.captions}" max="${count.video || 1}"></progress></div><div class="progress-row"><div class="progress-label"><span>Tài liệu đã trích văn bản</span><strong>${number(data.processed.documents)} / ${number(count.document)}</strong></div><progress class="progress-meter blue" value="${data.processed.documents}" max="${count.document || 1}"></progress></div><div class="progress-row"><div class="progress-label"><span>Tài liệu cần OCR</span><strong>${number(data.processed.needs_ocr)}</strong></div></div></div><div class="quick-actions"><button class="button button-soft" data-run="captions">≋ &nbsp; Đọc lại file phụ đề</button><button class="button button-soft" data-run="documents">▤ &nbsp; Đọc lại tài liệu</button></div></section></div>`;
+}
+
+function toolbar(showPlaceholderFilter = false) {
+  const choices = state.library.courses.map(row => `<option value="${esc(row.name)}" ${state.course === row.name ? "selected" : ""}>${esc(row.name)}</option>`).join("");
+  return `<div class="toolbar"><label class="search"><span aria-hidden="true">⌕</span><input id="search-input" type="search" placeholder="Tìm theo tên hoặc đường dẫn..." value="${esc(state.query)}" aria-label="Tìm kiếm"></label><select id="course-select" class="select" aria-label="Lọc khóa học"><option value="">Tất cả khóa học</option>${choices}</select>${showPlaceholderFilter ? `<label class="filter-check"><input id="hide-placeholders" type="checkbox" ${state.hidePlaceholders ? "checked" : ""}>Ẩn file giới thiệu</label>` : ""}</div>`;
+}
+function filtered(rows) {
+  const query = state.query.trim().toLocaleLowerCase("vi");
+  return rows.filter(row => (!state.course || row.course === state.course) && (!query || `${row.name} ${row.path} ${row.course}`.toLocaleLowerCase("vi").includes(query)));
+}
+
+function videos() {
+  const rows = filtered(state.library.videos);
+  return `${pageHead("THƯ VIỆN VIDEO", "Video bài học", "Mở video gốc, xem timeline phụ đề và tạo ghi chú có mốc thời gian.", `<button class="button button-outline" data-run="captions">↻ Đọc phụ đề</button>`)}${toolbar()}<section class="table-card"><div class="table-header"><strong>Danh sách video</strong><small>${number(rows.length)} / ${number(state.library.videos.length)} video</small></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Tên bài học</th><th>Khóa học</th><th>Phụ đề</th><th>Thời lượng</th><th></th></tr></thead><tbody>${rows.map(row => `<tr tabindex="0" role="button" data-open-kind="video" data-id="${esc(row.id)}"><td><div class="item-cell"><span class="file-icon">▷</span><div><strong title="${esc(row.name)}">${esc(row.name)}</strong><small title="${esc(row.path)}">${esc(row.path)}</small></div></div></td><td>${esc(row.course)}</td><td>${row.caption_id ? `<span class="tag">● ${number(row.cue_count)} đoạn</span>` : `<span class="tag muted">Chưa có file riêng</span>`}</td><td>${duration(row.duration_ms)}</td><td class="row-arrow">›</td></tr>`).join("")}</tbody></table>${rows.length ? "" : `<div class="no-results">Không tìm thấy video phù hợp.</div>`}</div></section>`;
+}
+
+function documents() {
+  const rows = filtered(state.library.documents).filter(row => !state.hidePlaceholders || !row.placeholder);
+  return `${pageHead("KHO TÀI LIỆU", "Tài liệu", "Đọc PDF, DOCX và TXT đã trích xuất; nhận biết file ảnh cần OCR.", `<button class="button button-outline" data-run="documents">↻ Đọc tài liệu</button>`)}${toolbar(true)}<section class="table-card"><div class="table-header"><strong>Danh sách tài liệu</strong><small>${number(rows.length)} / ${number(state.library.documents.length)} tài liệu</small></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Tên tài liệu</th><th>Khóa học</th><th>Trạng thái</th><th>Dung lượng</th><th></th></tr></thead><tbody>${rows.map(row => `<tr tabindex="0" role="button" data-open-kind="document" data-id="${esc(row.id)}"><td><div class="item-cell"><span class="file-icon doc">▤</span><div><strong title="${esc(row.name)}">${esc(row.name)}</strong><small title="${esc(row.path)}">${esc(row.path)}</small></div></div></td><td>${esc(row.course)}</td><td>${statusTag(row.status)}</td><td>${bytes(row.size)}</td><td class="row-arrow">›</td></tr>`).join("")}</tbody></table>${rows.length ? "" : `<div class="no-results">Không tìm thấy tài liệu phù hợp.</div>`}</div></section>`;
+}
+
+function notes() {
+  const rows = filtered(state.library.notes);
+  return `${pageHead("KIẾN THỨC ĐÃ LƯU", "Ghi chú học tập", "Bản tóm tắt có dẫn về phụ đề hoặc tài liệu nguồn.")}${toolbar()}<div class="note-grid">${rows.map(row => `<button type="button" class="note-card" data-open-kind="${esc(row.type)}" data-id="${esc(row.id)}"><span class="file-icon note">✦</span><h3>${esc(row.name)}</h3><p>${esc(row.course)} · ${row.type === "ai_note" ? "Ghi chú AI" : "Ghi chú mẫu"}</p><span class="bottom"><span>Đọc ghi chú</span><span>↗</span></span></button>`).join("")}</div>${rows.length ? "" : `<div class="empty-state">Chưa có ghi chú phù hợp. Mở một video có phụ đề để tạo ghi chú AI.</div>`}`;
+}
+
+function activity() {
+  return `${pageHead("QUY TRÌNH XỬ LÝ", "Hoạt động", "Theo dõi các lần quét Drive, đọc phụ đề, tài liệu và tạo ghi chú trong phiên web này.")}<div class="job-list">${state.jobs.map(job => `<article class="job-card"><div class="job-head"><strong>${esc(jobLabels[job.action] || job.action)}</strong>${job.status === "running" ? `<span class="tag blue">Đang chạy</span>` : job.status === "done" ? `<span class="tag">Hoàn thành</span>` : `<span class="tag warn">Thất bại</span>`}<time>${esc(new Date(job.started).toLocaleString("vi-VN"))}</time></div>${job.output ? `<pre>${esc(job.output)}</pre>` : `<p class="detail-meta">${job.status === "running" ? "Đang xử lý; trạng thái sẽ tự cập nhật." : "Không có thông báo."}</p>`}</article>`).join("") || `<div class="empty-state">Chưa có tác vụ nào được chạy trong phiên web này.</div>`}</div>`;
+}
+
+function render() {
+  if (!state.library) return;
+  document.querySelector("#crumb-title").textContent = labels[state.view];
+  document.querySelectorAll("#nav button").forEach(node => node.classList.toggle("active", node.dataset.view === state.view));
+  main.innerHTML = ({ overview, videos, documents, notes, activity })[state.view]();
+  const search = document.querySelector("#search-input");
+  if (search) search.addEventListener("input", event => { const pos = event.target.selectionStart; state.query = event.target.value; render(); const input = document.querySelector("#search-input"); input.focus(); input.setSelectionRange(pos, pos); });
+  document.querySelector("#course-select")?.addEventListener("change", event => { state.course = event.target.value; render(); });
+  document.querySelector("#hide-placeholders")?.addEventListener("change", event => { state.hidePlaceholders = event.target.checked; render(); });
+}
+
+async function readFile(kind, id) {
+  const reader = drawerContent.querySelector("#reader-content");
+  const title = drawerContent.querySelector("#reader-title");
+  if (!reader || !title) return;
+  title.textContent = "Đang tải nội dung…";
+  reader.textContent = "";
+  try {
+    const result = await api(`/api/file?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`);
+    title.textContent = kind === "document" ? "Văn bản đã trích" : kind === "transcript" ? "Timeline phụ đề" : "Ghi chú";
+    reader.textContent = result.content;
+  } catch (error) { title.textContent = "Không mở được nội dung"; reader.textContent = error.message; }
+}
+
+function openDrawer(kind, id) {
+  let item;
+  if (kind === "video") item = state.library.videos.find(row => row.id === id);
+  else if (kind === "document") item = state.library.documents.find(row => row.id === id);
+  else item = state.library.notes.find(row => row.id === id && row.type === kind);
+  if (!item) return;
+  state.selected = { kind, id };
+  const actions = kind === "video" ? `<a class="button button-outline" href="${esc(safeUrl(item.url))}" target="_blank" rel="noopener noreferrer">↗ Mở video Drive</a>${item.caption_id ? `<button class="button button-soft" data-reader-kind="transcript" data-reader-id="${esc(item.caption_id)}">≋ Xem phụ đề</button><button class="button button-accent" data-run="note" data-caption-id="${esc(item.caption_id)}">✦ Tạo ghi chú AI</button>${item.has_ai_note ? `<button class="button button-outline" data-reader-kind="ai_note" data-reader-id="${esc(item.caption_id)}">Đọc ghi chú AI</button>` : ""}${item.has_manual_note ? `<button class="button button-outline" data-reader-kind="study_note" data-reader-id="14-admin">Ghi chú mẫu</button>` : ""}` : ""}`
+    : kind === "document" ? `<a class="button button-outline" href="${esc(safeUrl(item.url))}" target="_blank" rel="noopener noreferrer">↗ Mở tài liệu Drive</a>${item.status === "ok" ? `<button class="button button-soft" data-reader-kind="document" data-reader-id="${esc(item.id)}">▤ Xem văn bản</button>` : ""}` : "";
+  const meta = kind === "video" ? `<span>${esc(item.course)}</span><span>${item.caption_id ? `${number(item.cue_count)} đoạn phụ đề · ${duration(item.duration_ms)}` : "Chưa có file phụ đề riêng"}</span>`
+    : kind === "document" ? `<span>${esc(item.course)}</span><span>${bytes(item.size)} · ${item.status === "ok" ? `${number(item.characters)} ký tự` : item.status === "needs_ocr" ? "Cần OCR để lấy chữ" : "Chưa đọc được nội dung"}</span>`
+      : `<span>${esc(item.course)} · ${kind === "ai_note" ? "Ghi chú AI" : "Ghi chú mẫu"}</span>`;
+  drawerContent.innerHTML = `<div class="drawer-top"><strong>${kind === "video" ? "CHI TIẾT VIDEO" : kind === "document" ? "CHI TIẾT TÀI LIỆU" : "GHI CHÚ HỌC TẬP"}</strong><button type="button" class="icon-button" data-close aria-label="Đóng">×</button></div><div class="drawer-body"><h2>${esc(item.name)}</h2><div class="detail-meta">${meta}<span>${esc(item.path || "")}</span></div><div class="detail-actions">${actions}</div><section class="reader"><div class="reader-head"><span id="reader-title">Nội dung</span><span>${kind === "video" ? "Phụ đề / ghi chú" : kind === "document" ? "Tệp văn bản" : "Markdown"}</span></div><pre id="reader-content">${kind === "video" && !item.caption_id ? "Chưa tìm thấy file phụ đề riêng cho video này." : kind === "document" && item.status !== "ok" ? "Tài liệu này chưa có văn bản để hiển thị." : "Đang tải nội dung…"}</pre></section></div>`;
+  backdrop.hidden = false; drawer.classList.add("open"); drawer.setAttribute("aria-hidden", "false");
+  if (kind === "video" && item.caption_id) readFile(item.has_ai_note ? "ai_note" : "transcript", item.caption_id);
+  else if (kind === "document" && item.status === "ok") readFile("document", item.id);
+  else if (kind === "ai_note" || kind === "study_note") readFile(kind, id);
+}
+function closeDrawer() { drawer.classList.remove("open"); drawer.setAttribute("aria-hidden", "true"); backdrop.hidden = true; state.selected = null; }
+
+async function runJob(action, captionId) {
+  try {
+    const job = await api("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json", "X-Drive-Studio-Token": state.token }, body: JSON.stringify({ action, caption_id: captionId || null }) });
+    closeDrawer(); state.view = "activity"; location.hash = "activity"; state.query = ""; state.course = "";
+    state.jobs.unshift(job); render(); toast(`${jobLabels[action]} đã bắt đầu.`);
+  } catch (error) { toast(error.message); }
+}
+
+document.addEventListener("click", event => {
+  const close = event.target.closest("[data-close]"); if (close) { closeDrawer(); return; }
+  const nav = event.target.closest("[data-view]"); if (nav) { state.view = nav.dataset.view; location.hash = state.view; state.query = ""; state.course = ""; render(); main.focus(); return; }
+  const run = event.target.closest("[data-run]"); if (run) { runJob(run.dataset.run, run.dataset.captionId); return; }
+  const reader = event.target.closest("[data-reader-kind]"); if (reader) { readFile(reader.dataset.readerKind, reader.dataset.readerId); return; }
+  const open = event.target.closest("[data-open-kind]"); if (open) openDrawer(open.dataset.openKind, open.dataset.id);
+});
+backdrop.addEventListener("click", closeDrawer);
+document.addEventListener("keydown", event => { if (event.key === "Escape") closeDrawer(); else if ((event.key === "Enter" || event.key === " ") && event.target.matches("tr[data-open-kind]")) { event.preventDefault(); openDrawer(event.target.dataset.openKind, event.target.dataset.id); } });
+window.addEventListener("hashchange", () => { const next = location.hash.slice(1); if (labels[next] && next !== state.view) { state.view = next; state.query = ""; state.course = ""; render(); } });
+
+async function pollJobs() {
+  try {
+    const data = await api("/api/jobs");
+    const signature = JSON.stringify(data.jobs.map(row => [row.id, row.status, row.output]));
+    if (signature !== state.lastJobs) {
+      const previous = state.jobs;
+      state.jobs = data.jobs; state.lastJobs = signature;
+      if (previous.some(row => row.status === "running") && data.jobs.some(row => row.status === "done" && previous.find(old => old.id === row.id)?.status === "running")) {
+        state.library = await api("/api/library"); toast("Tác vụ đã hoàn thành. Dữ liệu đã được cập nhật.");
+      }
+      if (state.view === "activity" || state.view === "overview") render();
+    }
+  } catch { /* Retain the last visible state if the local server is restarting. */ }
+}
+
+async function initialize() {
+  try {
+    const [session, data, jobs] = await Promise.all([api("/api/bootstrap"), api("/api/library"), api("/api/jobs")]);
+    state.token = session.token; state.library = data; state.jobs = jobs.jobs; state.lastJobs = JSON.stringify(jobs.jobs.map(row => [row.id, row.status, row.output])); render();
+    setInterval(pollJobs, 4000);
+  } catch (error) { main.innerHTML = `<div class="empty-state">Không tải được dữ liệu: ${esc(error.message)}</div>`; }
+}
+initialize();

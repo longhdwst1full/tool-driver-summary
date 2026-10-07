@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101e2b">
+    <title>Drive Studio · Quản lý nội dung học tập</title>
+    <meta name="description" content="Giao diện quản lý video, phụ đề, tài liệu và ghi chú học tập từ Google Drive.">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Điều hướng chính">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+          <div><strong>Drive Studio</strong><small>Không gian học tập</small></div>
+        </div>
+        <div class="workspace-label">WORKSPACE</div>
+        <nav class="nav" id="nav">
+          <button type="button" data-view="overview" class="active"><span class="nav-icon">▦</span>Tổng quan</button>
+          <button type="button" data-view="videos"><span class="nav-icon">▷</span>Video bài học</button>
+          <button type="button" data-view="documents"><span class="nav-icon">▤</span>Tài liệu</button>
+          <button type="button" data-view="notes"><span class="nav-icon">✦</span>Ghi chú</button>
+          <button type="button" data-view="activity"><span class="nav-icon">◷</span>Hoạt động</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="connection-pill"><span class="live-dot"></span> Drive chỉ đọc</div>
+          <p>Dữ liệu và tài khoản của bạn được xử lý trên máy này.</p>
+        </div>
+      </aside>
+
+      <div class="main-column">
+        <header class="topbar">
+          <div class="breadcrumbs"><span>Không gian làm việc</span><span class="crumb-separator">/</span><strong id="crumb-title">Tổng quan</strong></div>
+          <div class="top-actions">
+            <span class="local-badge">● <span>Local workspace</span></span>
+            <button type="button" class="button button-outline" data-run="scan"><span aria-hidden="true">↻</span> Quét lại Drive</button>
+          </div>
+        </header>
+
+        <main id="main" tabindex="-1"><div class="loading-state">Đang tải dữ liệu Drive…</div></main>
+      </div>
+    </div>
+
+    <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+    <aside id="drawer" class="drawer" aria-label="Chi tiết tệp" aria-hidden="true">
+      <div id="drawer-content"></div>
+    </aside>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

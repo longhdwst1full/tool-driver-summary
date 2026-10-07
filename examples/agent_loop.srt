@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:35,000
+Agent loop gồm ba bước: quan sát thông tin, suy luận việc cần làm, rồi thực hiện hành động.
+
+2
+00:00:35,000 --> 00:01:10,000
+Khi được hỏi thời tiết, agent gọi công cụ thời tiết trước khi trả lời.
+
+3
+00:01:10,000 --> 00:01:40,000
+Nếu công cụ lỗi, agent cần báo không lấy được dữ liệu thay vì đoán thời tiết.
