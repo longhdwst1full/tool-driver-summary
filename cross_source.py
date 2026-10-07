@@ -66,6 +66,28 @@ def reconcile(client, lesson: dict) -> dict:
     return result
 
 
+def write_review(output_dir: Path) -> Path:
+    lines = ["# Cần xem lại giữa phụ đề và tài liệu", "",
+             "Các cặp dưới đây có quote nguyên văn từ hai nguồn; nhãn mâu thuẫn cần người xem lại ngữ cảnh.", ""]
+    for path in sorted(output_dir.rglob("*.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        conflicts = [row for row in data.get("matches", []) if row.get("type") == "conflict"]
+        if not conflicts:
+            continue
+        lines += [f"## {path.stem}", ""]
+        for row in conflicts:
+            caption, document = row["caption_ref"], row["document_ref"]
+            lines += [f"- **Nhận xét:** {row['explanation']}",
+                      f"  - Phụ đề `{caption['chunk_id']}`: “{caption['quote']}”",
+                      f"  - Tài liệu `{document['chunk_id']}`: “{document['quote']}”", ""]
+    if len(lines) == 4:
+        lines += ["Không có cặp nào được gắn cờ mâu thuẫn.", ""]
+    output_dir.mkdir(parents=True, exist_ok=True)
+    target = safe_output_file(output_dir, "review.md", ".md")
+    target.write_text("\n".join(lines), encoding="utf-8")
+    return target
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Đối chiếu phụ đề và tài liệu đi kèm có dẫn nguồn")
     parser.add_argument("--packs", type=Path, default=Path("drive-reports/lesson-packs"))
@@ -93,6 +115,7 @@ def main() -> int:
         target.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         results.append({"lesson": lesson["title"], "status": result["status"],
                         "matches": len(result["matches"])})
+    write_review(args.output)
     print(json.dumps(results, ensure_ascii=False))
     return 0 if all(row["status"] in ("ok", "cached") for row in results) else 2
 

@@ -143,6 +143,9 @@ def library() -> dict:
     if (REPORTS / "study-notes/index.md").is_file():
         notes.append({"id": "index", "name": "Chỉ mục toàn bộ khóa học", "course": "Tất cả khóa học",
                       "type": "study_index", "source": "index"})
+    if (REPORTS / "cross-source/review.md").is_file():
+        notes.append({"id": "cross-source-review", "name": "Cần xem lại giữa phụ đề và tài liệu",
+                      "course": "Tất cả khóa học", "type": "cross_source_review", "source": "review"})
     for course in courses:
         summary = safe_output_file(REPORTS / "courses", Path(course) / "course_summary.md", ".md")
         if summary.is_file():
@@ -210,6 +213,9 @@ def file_content(kind: str, file_id: str) -> dict | None:
     elif kind == "study_index" and file_id == "index":
         path = REPORTS / "study-notes/index.md"
         title = "Chỉ mục toàn bộ khóa học"
+    elif kind == "cross_source_review" and file_id == "cross-source-review":
+        path = REPORTS / "cross-source/review.md"
+        title = "Cần xem lại giữa phụ đề và tài liệu"
     elif kind == "course_summary":
         note = next((row for row in library()["notes"] if row["type"] == kind and row["id"] == file_id), None)
         path = safe_output_file(REPORTS / "courses", Path(note["course"]) / "course_summary.md", ".md") if note else None
