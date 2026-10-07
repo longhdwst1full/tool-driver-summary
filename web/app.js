@@ -1,5 +1,5 @@
 const initialView = ["overview", "videos", "documents", "notes", "activity"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "overview";
-const state = { library: null, jobs: [], token: "", view: initialView, query: "", course: "", hidePlaceholders: true, selected: null, lastJobs: "" };
+const state = { library: null, jobs: [], token: "", view: initialView, query: "", course: "", selected: null, lastJobs: "" };
 const main = document.querySelector("#main");
 const drawer = document.querySelector("#drawer");
 const backdrop = document.querySelector("#drawer-backdrop");
@@ -48,9 +48,9 @@ function overview() {
     <section class="panel"><div class="panel-header"><div><h3>Tiến độ xử lý</h3><span>Từ dữ liệu đã quét</span></div></div><div class="progress-block"><div class="progress-row"><div class="progress-label"><span>Video có phụ đề riêng đã đọc</span><strong>${number(data.processed.captions)} / ${number(count.video)}</strong></div><progress class="progress-meter" value="${data.processed.captions}" max="${count.video || 1}"></progress></div><div class="progress-row"><div class="progress-label"><span>Tài liệu đã trích văn bản</span><strong>${number(data.processed.documents)} / ${number(count.document)}</strong></div><progress class="progress-meter blue" value="${data.processed.documents}" max="${count.document || 1}"></progress></div><div class="progress-row"><div class="progress-label"><span>Tài liệu cần OCR</span><strong>${number(data.processed.needs_ocr)}</strong></div></div></div><div class="quick-actions"><button class="button button-soft" data-run="captions">≋ &nbsp; Đọc lại file phụ đề</button><button class="button button-soft" data-run="documents">▤ &nbsp; Đọc lại tài liệu</button></div></section></div>`;
 }
 
-function toolbar(showPlaceholderFilter = false) {
+function toolbar() {
   const choices = state.library.courses.map(row => `<option value="${esc(row.name)}" ${state.course === row.name ? "selected" : ""}>${esc(row.name)}</option>`).join("");
-  return `<div class="toolbar"><label class="search"><span aria-hidden="true">⌕</span><input id="search-input" type="search" placeholder="Tìm theo tên hoặc đường dẫn..." value="${esc(state.query)}" aria-label="Tìm kiếm"></label><select id="course-select" class="select" aria-label="Lọc khóa học"><option value="">Tất cả khóa học</option>${choices}</select>${showPlaceholderFilter ? `<label class="filter-check"><input id="hide-placeholders" type="checkbox" ${state.hidePlaceholders ? "checked" : ""}>Ẩn file giới thiệu</label>` : ""}</div>`;
+  return `<div class="toolbar"><label class="search"><span aria-hidden="true">⌕</span><input id="search-input" type="search" placeholder="Tìm theo tên hoặc đường dẫn..." value="${esc(state.query)}" aria-label="Tìm kiếm"></label><select id="course-select" class="select" aria-label="Lọc khóa học"><option value="">Tất cả khóa học</option>${choices}</select></div>`;
 }
 function filtered(rows) {
   const query = state.query.trim().toLocaleLowerCase("vi");
@@ -63,8 +63,8 @@ function videos() {
 }
 
 function documents() {
-  const rows = filtered(state.library.documents).filter(row => !state.hidePlaceholders || !row.placeholder);
-  return `${pageHead("KHO TÀI LIỆU", "Tài liệu", "Đọc PDF, DOCX và TXT đã trích xuất; nhận biết file ảnh cần OCR.", `<button class="button button-outline" data-run="documents">↻ Đọc tài liệu</button>`)}${toolbar(true)}<section class="table-card"><div class="table-header"><strong>Danh sách tài liệu</strong><small>${number(rows.length)} / ${number(state.library.documents.length)} tài liệu</small></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Tên tài liệu</th><th>Khóa học</th><th>Trạng thái</th><th>Dung lượng</th><th></th></tr></thead><tbody>${rows.map(row => `<tr tabindex="0" role="button" data-open-kind="document" data-id="${esc(row.id)}"><td><div class="item-cell"><span class="file-icon doc">▤</span><div><strong title="${esc(row.name)}">${esc(row.name)}</strong><small title="${esc(row.path)}">${esc(row.path)}</small></div></div></td><td>${esc(row.course)}</td><td>${statusTag(row.status)}</td><td>${bytes(row.size)}</td><td class="row-arrow">›</td></tr>`).join("")}</tbody></table>${rows.length ? "" : `<div class="no-results">Không tìm thấy tài liệu phù hợp.</div>`}</div></section>`;
+  const rows = filtered(state.library.documents);
+  return `${pageHead("KHO TÀI LIỆU", "Tài liệu học", `${number(state.library.processed.excluded)} file quảng cáo Khóa học giá hời đã được bỏ qua.`, `<button class="button button-outline" data-run="documents">↻ Đọc tài liệu</button>`)}${toolbar()}<section class="table-card"><div class="table-header"><strong>Danh sách tài liệu</strong><small>${number(rows.length)} / ${number(state.library.documents.length)} tài liệu</small></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Tên tài liệu</th><th>Khóa học</th><th>Trạng thái</th><th>Dung lượng</th><th></th></tr></thead><tbody>${rows.map(row => `<tr tabindex="0" role="button" data-open-kind="document" data-id="${esc(row.id)}"><td><div class="item-cell"><span class="file-icon doc">▤</span><div><strong title="${esc(row.name)}">${esc(row.name)}</strong><small title="${esc(row.path)}">${esc(row.path)}</small></div></div></td><td>${esc(row.course)}</td><td>${statusTag(row.status)}</td><td>${bytes(row.size)}</td><td class="row-arrow">›</td></tr>`).join("")}</tbody></table>${rows.length ? "" : `<div class="no-results">Không tìm thấy tài liệu phù hợp.</div>`}</div></section>`;
 }
 
 function notes() {
@@ -84,7 +84,6 @@ function render() {
   const search = document.querySelector("#search-input");
   if (search) search.addEventListener("input", event => { const pos = event.target.selectionStart; state.query = event.target.value; render(); const input = document.querySelector("#search-input"); input.focus(); input.setSelectionRange(pos, pos); });
   document.querySelector("#course-select")?.addEventListener("change", event => { state.course = event.target.value; render(); });
-  document.querySelector("#hide-placeholders")?.addEventListener("change", event => { state.hidePlaceholders = event.target.checked; render(); });
 }
 
 async function readFile(kind, id) {

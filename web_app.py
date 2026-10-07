@@ -16,6 +16,9 @@ import sys
 from threading import Lock, Thread
 from urllib.parse import parse_qs, urlparse
 
+from output_layout import is_promotional_document, output_paths, safe_output_file
+from study_pack import manual_note_paths
+
 
 ROOT = Path(__file__).resolve().parent
 REPORTS = ROOT / "drive-reports"
@@ -56,6 +59,8 @@ def library() -> dict:
     documents = read_json(REPORTS / "documents/manifest.json", {"files": [], "ok": 0, "needs_ocr": 0})
     caption_by_id = {row["id"]: row for row in captions.get("files", [])}
     doc_by_id = {row["id"]: row for row in documents.get("files", [])}
+    ai_paths = output_paths(scan, "ai_note")
+    manual_paths = manual_note_paths(scan)
     videos = []
     docs = []
     courses: dict[str, dict] = {}
@@ -63,6 +68,8 @@ def library() -> dict:
     for item in scan.get("items", []):
         course = course_name(item["path"])
         if item["kind"] not in {"video", "document"}:
+            continue
+        if is_promotional_document(item) or doc_by_id.get(item["id"], {}).get("status") == "excluded":
             continue
         bucket = courses.setdefault(course, {"name": course, "videos": 0, "documents": 0, "captions": 0})
         base = {"id": item["id"], "name": display_name(item["name"]), "path": item["path"],
@@ -77,9 +84,13 @@ def library() -> dict:
             video = {**base, "caption_id": transcript["id"] if transcript else None,
                      "cue_count": transcript.get("cue_count") if transcript else None,
                      "duration_ms": transcript.get("duration_ms") if transcript else None,
-                     "has_ai_note": bool(transcript and (REPORTS / "ai-notes" / f"{transcript['id']}.md").is_file()),
+                     "has_ai_note": bool(transcript and (
+                         safe_output_file(REPORTS / "ai-notes", ai_paths[transcript["id"]], ".md").is_file()
+                         or (REPORTS / "ai-notes" / f"{transcript['id']}.md").is_file())),
                      "has_manual_note": bool(transcript and transcript["name"].startswith("14.")
-                                             and (REPORTS / "study-notes/14-admin.md").is_file())}
+                                             and ("14-admin" in manual_paths)
+                                             and (safe_output_file(REPORTS / "study-notes", manual_paths["14-admin"], ".md").is_file()
+                                                  or (REPORTS / "study-notes/14-admin.md").is_file()))}
             videos.append(video)
             if video["has_ai_note"]:
                 notes.append({"id": transcript["id"], "name": base["name"], "course": course,
@@ -88,23 +99,28 @@ def library() -> dict:
             bucket["documents"] += 1
             result = doc_by_id.get(item["id"], {})
             docs.append({**base, "status": result.get("status", "pending"),
-                         "characters": result.get("characters"),
-                         "placeholder": item["name"].startswith("0. khoahocgiahoi.com")})
+                         "characters": result.get("characters")})
     for slug, title, source, course in (
         ("14-admin", "Bài 14 · Tạo dự án Admin bằng prompt", "video", "Vibe Coding 2026 Fullstack"),
         ("claude-ai-hieu-qua", "Hướng dẫn sử dụng Claude AI hiệu quả", "document", "Tài liệu Claude AI"),
     ):
-        if (REPORTS / "study-notes" / f"{slug}.md").is_file():
+        target = manual_paths.get(slug)
+        if target and (safe_output_file(REPORTS / "study-notes", target, ".md").is_file()
+                       or (REPORTS / "study-notes" / f"{slug}.md").is_file()):
             notes.append({"id": slug, "name": title, "course": course,
                           "type": "study_note", "source": source})
     videos.sort(key=lambda row: row["path"].casefold())
     docs.sort(key=lambda row: row["path"].casefold())
     notes.sort(key=lambda row: row["name"].casefold())
+    counts = dict(scan.get("counts", {}))
+    counts["document"] = len(docs)
     return {"folder": scan["folder"], "total": scan.get("total", 0),
-            "counts": scan.get("counts", {}), "videos": videos, "documents": docs,
+            "counts": counts, "videos": videos, "documents": docs,
             "notes": notes, "courses": sorted(courses.values(), key=lambda row: row["name"].casefold()),
-            "processed": {"captions": captions.get("ok", 0), "documents": documents.get("ok", 0),
-                          "needs_ocr": documents.get("needs_ocr", 0)}}
+            "processed": {"captions": captions.get("ok", 0),
+                          "documents": sum(row["status"] == "ok" for row in docs),
+                          "excluded": documents.get("excluded", 0),
+                          "needs_ocr": sum(row["status"] == "needs_ocr" for row in docs)}}
 
 
 def file_content(kind: str, file_id: str) -> dict | None:
@@ -113,20 +129,31 @@ def file_content(kind: str, file_id: str) -> dict | None:
     if kind == "transcript":
         manifest = read_json(REPORTS / "transcripts/manifest.json")
         row = next((x for x in manifest.get("files", []) if x["id"] == file_id and x["status"] == "ok"), None)
-        path = REPORTS / "transcripts" / f"{file_id}.md" if row else None
+        path = safe_output_file(REPORTS / "transcripts", row["output"], ".md") if row else None
         title = row["name"] if row else ""
     elif kind == "document":
         manifest = read_json(REPORTS / "documents/manifest.json")
         row = next((x for x in manifest.get("files", []) if x["id"] == file_id and x["status"] == "ok"), None)
-        path = REPORTS / "documents" / f"{file_id}.txt" if row else None
+        path = safe_output_file(REPORTS / "documents", row["output"], ".txt") if row else None
         title = row["name"] if row else ""
     elif kind == "ai_note":
         manifest = read_json(REPORTS / "transcripts/manifest.json")
         row = next((x for x in manifest.get("files", []) if x["id"] == file_id and x["status"] == "ok"), None)
-        path = REPORTS / "ai-notes" / f"{file_id}.md" if row else None
+        if row:
+            scan = read_json(REPORTS / "scan.json")
+            relative = output_paths(scan, "ai_note").get(file_id)
+            path = safe_output_file(REPORTS / "ai-notes", relative, ".md") if relative else None
+            if path and not path.is_file():
+                path = REPORTS / "ai-notes" / f"{file_id}.md"
+        else:
+            path = None
         title = row["name"] if row else ""
     elif kind == "study_note" and file_id in {"14-admin", "claude-ai-hieu-qua"}:
-        path = REPORTS / "study-notes" / f"{file_id}.md"
+        scan = read_json(REPORTS / "scan.json")
+        relative = manual_note_paths(scan).get(file_id)
+        path = safe_output_file(REPORTS / "study-notes", relative, ".md") if relative else None
+        if path and not path.is_file():
+            path = REPORTS / "study-notes" / f"{file_id}.md"
         title = file_id
     else:
         return None
@@ -169,8 +196,16 @@ def start_job(action: str, caption_id: str | None = None) -> dict:
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     timeout=1800, check=False)
             output = result.stdout[-6000:]
-            status = "done" if result.returncode == 0 else "failed"
             exit_code = result.returncode
+            if exit_code == 0 and action in {"captions", "documents", "note"} and all(
+                (REPORTS / section / "manifest.json").is_file() for section in ("transcripts", "documents")
+            ):
+                index_result = subprocess.run([sys.executable, "study_pack.py"], cwd=ROOT,
+                                              env=env, text=True, stdout=subprocess.PIPE,
+                                              stderr=subprocess.STDOUT, timeout=120, check=False)
+                output = (output + "\n" + index_result.stdout)[-6000:]
+                exit_code = index_result.returncode
+            status = "done" if exit_code == 0 else "failed"
         except subprocess.TimeoutExpired:
             output, status, exit_code = "Tác vụ vượt thời hạn 30 phút.", "failed", -1
         except OSError as exc:

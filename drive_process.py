@@ -11,6 +11,7 @@ import sys
 
 from drive_scan import google_service
 from getsub_demo import markdown, parse_captions
+from output_layout import output_paths, safe_output_file, video_title
 
 
 MAX_CAPTION_BYTES = 2_000_000
@@ -18,11 +19,17 @@ MAX_CAPTION_BYTES = 2_000_000
 
 def process_captions(service, scan: dict, output_dir: Path) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
+    named_paths = output_paths(scan, "transcript")
+    videos_by_caption = {caption["id"]: video for video in scan["items"] if video["kind"] == "video"
+                         for caption in video.get("transcript_files", [])}
     results = []
     for item in scan["items"]:
         if item["kind"] != "transcript":
             continue
-        entry = {"id": item["id"], "name": item["name"], "path": item["path"]}
+        video = videos_by_caption.get(item["id"])
+        entry = {"id": item["id"], "name": item["name"], "path": item["path"],
+                 "modified_time": item.get("modified_time"),
+                 "video_id": video["id"] if video else None}
         try:
             if not re.fullmatch(r"[A-Za-z0-9_-]+", item["id"]):
                 raise ValueError("ID file không hợp lệ")
@@ -35,8 +42,14 @@ def process_captions(service, scan: dict, output_dir: Path) -> dict:
                 raise ValueError("File vượt giới hạn 2 MB cho bản thử")
             decoded = raw.decode("utf-8-sig")
             cues = parse_captions(decoded)
-            output_name = item["id"] + ".md"
-            (output_dir / output_name).write_text(markdown(item["name"], cues), encoding="utf-8")
+            output_name = named_paths[item["id"]].as_posix()
+            output_path = safe_output_file(output_dir, output_name, ".md")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            title = video_title(video["name"]) if video else item["name"]
+            output_path.write_text(markdown(title, cues), encoding="utf-8")
+            legacy_path = safe_output_file(output_dir, item["id"] + ".md", ".md")
+            if legacy_path != output_path and legacy_path.is_file():
+                legacy_path.unlink()
             entry.update({
                 "status": "ok",
                 "cue_count": len(cues),

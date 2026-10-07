@@ -48,7 +48,7 @@ Nếu trong thư mục có file phụ đề `.srt`/`.vtt` riêng, chạy tiếp:
 PYTHONPATH=.deps python3 drive_process.py
 ```
 
-Kết quả theo từng file nằm trong `drive-reports/transcripts/`; `manifest.json` ghi số đoạn, thời lượng và lỗi nếu có. Phần đầu mỗi file Markdown chỉ là 5 đoạn phụ đề đầu để kiểm tra, chưa phải bản tóm tắt toàn bài bằng AI.
+Kết quả theo từng file nằm trong `drive-reports/transcripts/<tên khóa học>/<tên chương>/<tên video>.md`; `manifest.json` ghi số đoạn, thời lượng và lỗi nếu có. Phần đầu mỗi file Markdown chỉ là 5 đoạn phụ đề đầu để kiểm tra, chưa phải bản tóm tắt toàn bài bằng AI.
 
 Đọc văn bản từ các tài liệu PDF, DOCX và TXT trong báo cáo quét:
 
@@ -56,7 +56,15 @@ Kết quả theo từng file nằm trong `drive-reports/transcripts/`; `manifest
 PYTHONPATH=.deps python3 drive_documents.py --max-mb 30
 ```
 
-Kết quả nằm trong `drive-reports/documents/`. `manifest.json` được lưu sau từng file, ghi số ký tự, mã băm nội dung và trạng thái `needs_ocr` nếu PDF không trích được chữ. Lần chạy sau dùng lại những file đã đọc thành công; dùng `--refresh` để tải lại. `--max-mb` đặt giới hạn kích thước từng tài liệu; file lớn được tải theo từng phần.
+Kết quả nằm trong `drive-reports/documents/<tên khóa học>/<tên chương>/<tên tài liệu>.txt`. `manifest.json` được lưu sau từng file, ghi số ký tự, mã băm nội dung và trạng thái `needs_ocr` nếu PDF không trích được chữ. Các tài liệu quảng cáo “Các khóa học thuộc về Khóa học giá hời” được đánh dấu `excluded`, không tải lại và không xuất hiện trong thư viện học tập. Lần chạy sau dùng lại những file đã đọc thành công; dùng `--refresh` để tải lại. `--max-mb` đặt giới hạn kích thước từng tài liệu; file lớn được tải theo từng phần.
+
+Tạo lại chỉ mục liên kết video, phụ đề, tài liệu và ghi chú của mọi khóa học:
+
+```bash
+python3 study_pack.py
+```
+
+Chỉ mục nằm tại `drive-reports/study-notes/index.md`. Tên file kết quả theo tên khóa học, chương, bài hoặc video trên Drive; nếu trùng tên, chương trình thêm một phần ngắn của ID để tránh ghi đè. File gốc trên Drive không bị đổi tên. Khi xử lý từ giao diện web, chỉ mục được cập nhật sau tác vụ thành công.
 
 ## Tạo ghi chú AI bằng đăng nhập ChatGPT trong Codex CLI
 

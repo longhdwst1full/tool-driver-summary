@@ -12,14 +12,18 @@ class WebAppTests(unittest.TestCase):
         with TemporaryDirectory() as folder, patch("web_app.REPORTS", Path(folder)):
             report = Path(folder)
             (report / "scan.json").write_text(json.dumps({
-                "folder": {"id": "folder1", "name": "Khóa học"}, "total": 2,
-                "counts": {"video": 1, "document": 1},
+                "folder": {"id": "folder1", "name": "Khóa học"}, "total": 4,
+                "counts": {"folder": 1, "video": 1, "document": 1, "transcript": 1},
                 "items": [
+                    {"id": "course1", "parent_id": "folder1", "name": "Course",
+                     "path": "Khóa học/Course", "kind": "folder"},
                     {"id": "video1", "name": "Bài 1.mp4", "path": "Khóa học/Course/Bài 1.mp4",
-                     "kind": "video", "url": "https://drive.google.com/video1", "size": 100,
+                     "parent_id": "course1", "kind": "video", "url": "https://drive.google.com/video1", "size": 100,
                      "transcript_files": [{"id": "caption1"}]},
+                    {"id": "caption1", "name": "Bài 1.srt", "path": "Khóa học/Course/Bài 1.srt",
+                     "parent_id": "course1", "kind": "transcript"},
                     {"id": "doc1", "name": "Tài liệu.pdf", "path": "Khóa học/Course/Tài liệu.pdf",
-                     "kind": "document", "url": "https://drive.google.com/doc1", "size": 200},
+                     "parent_id": "course1", "kind": "document", "url": "https://drive.google.com/doc1", "size": 200},
                 ],
             }), encoding="utf-8")
             (report / "transcripts").mkdir()

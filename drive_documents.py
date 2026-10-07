@@ -12,6 +12,7 @@ import re
 import sys
 
 from drive_scan import google_service
+from output_layout import is_promotional_document, output_paths, safe_output_file
 
 
 MAX_DOCUMENT_BYTES = 10_000_000
@@ -45,7 +46,7 @@ def extract_text(raw: bytes, mime_type: str) -> str:
 
 def save_manifest(path: Path, scan: dict, results: list[dict]) -> dict:
     counts = {status: sum(x["status"] == status for x in results) for status in (
-        "ok", "needs_ocr", "too_large", "unsupported", "no_access", "error"
+        "ok", "excluded", "needs_ocr", "too_large", "unsupported", "no_access", "error"
     )}
     manifest = {"folder_id": scan["folder"]["id"], "total": len(results), **counts, "files": results}
     temporary = path.with_suffix(".tmp")
@@ -77,6 +78,7 @@ def process_documents(service, scan: dict, output_dir: Path, max_bytes: int = MA
                       refresh: bool = False) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "manifest.json"
+    named_paths = output_paths(scan, "document")
     previous = {}
     if manifest_path.is_file() and not refresh:
         old = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -96,9 +98,19 @@ def process_documents(service, scan: dict, output_dir: Path, max_bytes: int = MA
         try:
             if not re.fullmatch(r"[A-Za-z0-9_-]+", item["id"]):
                 raise ValueError("ID file không hợp lệ")
-            output_name = item["id"] + ".txt"
-            output_path = output_dir / output_name
+            output_name = named_paths[item["id"]].as_posix()
+            output_path = safe_output_file(output_dir, output_name, ".txt")
             prior = previous.get(item["id"])
+            legacy_path = safe_output_file(output_dir, item["id"] + ".txt", ".txt")
+            old_name = prior.get("output", item["id"] + ".txt") if prior else item["id"] + ".txt"
+            old_path = safe_output_file(output_dir, old_name, ".txt")
+            if is_promotional_document(item):
+                if old_path.is_file() and is_promotional_document(item, old_path.read_text(encoding="utf-8")):
+                    old_path.unlink()
+                entry.update({"status": "excluded", "reason": "Tài liệu quảng cáo Khóa học giá hời"})
+                results.append(entry)
+                save_manifest(manifest_path, scan, results)
+                continue
             if (not refresh and prior and prior.get("modified_time") == item.get("modified_time")
                     and prior.get("status") in {"needs_ocr", "unsupported", "no_access"}):
                 entry.update(prior)
@@ -107,21 +119,38 @@ def process_documents(service, scan: dict, output_dir: Path, max_bytes: int = MA
                 continue
             if (not refresh and prior and prior.get("status") == "ok"
                     and prior.get("modified_time") == item.get("modified_time")
-                    and output_path.is_file()):
-                content = output_path.read_text(encoding="utf-8").strip()
+                    and (old_path.is_file() or output_path.is_file())):
+                cached_path = old_path if old_path.is_file() else output_path
+                content = cached_path.read_text(encoding="utf-8").strip()
                 if content and sha256(content.encode("utf-8")).hexdigest() == prior.get("sha256"):
-                    entry.update(prior)
+                    if is_promotional_document(item, content):
+                        cached_path.unlink()
+                        entry.update({"status": "excluded", "reason": "Tài liệu quảng cáo Khóa học giá hời"})
+                    else:
+                        output_path.parent.mkdir(parents=True, exist_ok=True)
+                        if cached_path != output_path:
+                            cached_path.replace(output_path)
+                        entry.update(prior)
+                        entry["output"] = output_name
                     results.append(entry)
                     save_manifest(manifest_path, scan, results)
                     continue
             # A run interrupted before its first manifest can still reuse extracted text.
-            if not refresh and not prior and output_path.is_file():
-                content = output_path.read_text(encoding="utf-8").strip()
+            cached_path = output_path if output_path.is_file() else legacy_path
+            if not refresh and not prior and cached_path.is_file():
+                content = cached_path.read_text(encoding="utf-8").strip()
                 if content:
-                    entry.update({"status": "ok", "bytes": item.get("size"),
-                                  "characters": len(content),
-                                  "sha256": sha256(content.encode("utf-8")).hexdigest(),
-                                  "output": output_name})
+                    if is_promotional_document(item, content):
+                        cached_path.unlink()
+                        entry.update({"status": "excluded", "reason": "Tài liệu quảng cáo Khóa học giá hời"})
+                    else:
+                        output_path.parent.mkdir(parents=True, exist_ok=True)
+                        if cached_path != output_path:
+                            cached_path.replace(output_path)
+                        entry.update({"status": "ok", "bytes": item.get("size"),
+                                      "characters": len(content),
+                                      "sha256": sha256(content.encode("utf-8")).hexdigest(),
+                                      "output": output_name})
                     results.append(entry)
                     save_manifest(manifest_path, scan, results)
                     continue
@@ -142,7 +171,11 @@ def process_documents(service, scan: dict, output_dir: Path, max_bytes: int = MA
                     content = extract_text(raw, item["mime_type"]).strip()
                     if not content:
                         entry.update({"status": "needs_ocr", "bytes": len(raw)})
+                    elif is_promotional_document(item, content):
+                        entry.update({"status": "excluded", "bytes": len(raw),
+                                      "reason": "Tài liệu quảng cáo Khóa học giá hời"})
                     else:
+                        output_path.parent.mkdir(parents=True, exist_ok=True)
                         output_path.write_text(content + "\n", encoding="utf-8")
                         entry.update({
                             "status": "ok",
@@ -176,6 +209,7 @@ def main() -> int:
                                    max_bytes=args.max_mb * 1_000_000, refresh=args.refresh)
         print(
             f"Tài liệu: {result['ok']}/{result['total']} đã đọc; "
+            f"bỏ qua quảng cáo: {result['excluded']}; "
             f"cần OCR: {result['needs_ocr']}; quá lớn: {result['too_large']}; "
             f"không hỗ trợ: {result['unsupported']}; lỗi: {result['error']}"
         )

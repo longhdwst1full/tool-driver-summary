@@ -34,7 +34,7 @@ class Service:
 class DocumentTests(unittest.TestCase):
     def test_checkpoint_and_resume_skip_download(self):
         scan = {"folder": {"id": "root"}, "items": [{
-            "kind": "document", "id": "file_1", "name": "test.txt", "path": "test.txt",
+            "kind": "document", "id": "file_1", "parent_id": "root", "name": "test.txt", "path": "test.txt",
             "mime_type": "text/plain", "url": "https://drive.google.com/open?id=file_1",
             "modified_time": "2026-01-01", "size": 17,
         }]}
@@ -50,7 +50,7 @@ class DocumentTests(unittest.TestCase):
 
     def test_large_file_is_skipped_before_download(self):
         scan = {"folder": {"id": "root"}, "items": [{
-            "kind": "document", "id": "file_2", "name": "large.pdf", "path": "large.pdf",
+            "kind": "document", "id": "file_2", "parent_id": "root", "name": "large.pdf", "path": "large.pdf",
             "mime_type": "application/pdf", "url": "https://drive.google.com/open?id=file_2",
             "size": 11_000_000,
         }]}
@@ -59,6 +59,21 @@ class DocumentTests(unittest.TestCase):
             result = process_documents(service, scan, Path(folder))
             self.assertEqual(result["too_large"], 1)
             self.assertEqual(service.api.calls, [])
+
+    def test_promotional_file_is_excluded_without_download(self):
+        scan = {"folder": {"id": "root"}, "items": [{
+            "kind": "document", "id": "promo_1", "parent_id": "root",
+            "name": "0. khoahocgiahoi.com.txt", "path": "0. khoahocgiahoi.com.txt",
+            "mime_type": "text/plain", "url": "https://drive.google.com/promo_1",
+        }]}
+        with TemporaryDirectory() as folder:
+            output = Path(folder)
+            (output / "promo_1.txt").write_text("Các khóa học thuộc về Khóa học giá hời", encoding="utf-8")
+            service = Service()
+            result = process_documents(service, scan, output)
+            self.assertEqual(result["excluded"], 1)
+            self.assertEqual(service.api.calls, [])
+            self.assertFalse((output / "promo_1.txt").exists())
 
 
 if __name__ == "__main__":
