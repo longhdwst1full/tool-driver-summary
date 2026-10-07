@@ -19,6 +19,10 @@
 | Giao diện quản lý cục bộ | Hoàn thành |
 | Tên kết quả theo khóa học/chương/bài, lọc tài liệu quảng cáo, chỉ mục toàn bộ thư mục | Hoàn thành |
 | Trạng thái nguồn của video (`caption_file` / `asr_ready` / `no_source`), chia đoạn, lớp LLM | Hoàn thành |
+| Gói bài học có dẫn nguồn và kiểm tra tự động | Đã có trong code; chạy từng bài có phụ đề để tạo dữ liệu |
+| Web duyệt theo khóa học/chương và xem Markdown | Hoàn thành |
+| Tổng hợp nhiều bài thành kiến thức cấp khóa | Chưa triển khai |
+| Trích văn bản PPTX | Chưa triển khai |
 | OCR cho PDF chứa ảnh | Chưa triển khai |
 | ASR cho video tải được | Chưa triển khai; video trong thư mục hiện tại đều bị chủ sở hữu tắt quyền tải |
 | Transcript nhúng trong trình phát Drive và video không có file phụ đề riêng | Chưa được Drive API v3 cung cấp trực tiếp |

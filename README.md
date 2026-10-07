@@ -10,7 +10,7 @@ Sau khi đã quét Drive, mở giao diện trên máy:
 python3 web_app.py
 ```
 
-Truy cập **http://127.0.0.1:8765**. Giao diện có tổng quan, tìm kiếm và lọc video/tài liệu theo khóa học, mở phụ đề và văn bản đã trích, xem ghi chú, cùng lịch sử tác vụ. Từ giao diện có thể bấm quét lại Drive, đọc phụ đề, đọc tài liệu hoặc tạo ghi chú AI cho video có phụ đề riêng. Dùng `python3 web_app.py --port 8766` nếu cổng mặc định đang bận.
+Truy cập **http://127.0.0.1:8765**. Video được duyệt theo khóa học rồi theo chương; chọn bài để mở video gốc, phụ đề và ghi chú. Các file Markdown được xem dưới dạng trang đọc có tiêu đề, danh sách và bảng. Giao diện còn có tài liệu, ghi chú, lịch sử tác vụ và các nút quét Drive, đọc phụ đề, đọc tài liệu, tạo ghi chú AI hoặc gói bài học cho video có phụ đề riêng. Dùng `python3 web_app.py --port 8766` nếu cổng mặc định đang bận.
 
 Web chỉ lắng nghe trên `127.0.0.1`. API chỉ đọc nội dung thuộc manifest; các nút xử lý chỉ chạy tác vụ đã định sẵn. `credentials.json` và `token.json` không được gửi cho trình duyệt. Đóng web bằng `Ctrl+C` trong terminal.
 
@@ -78,5 +78,15 @@ python3 codex_notes.py --all
 ```
 
 Script tự tìm Codex CLI trong tiện ích VS Code nếu lệnh `codex` không có trong PATH. Nếu cài ở chỗ khác, thêm `--codex /duong/dan/toi/codex`. Ghi chú sinh ra ở `drive-reports/ai-notes/` và được kiểm tra để mốc thời gian khớp phụ đề. Dùng `--refresh` nếu muốn tạo lại. Các báo cáo và ghi chú được tạo từ Drive là dữ liệu riêng của người dùng, được giữ cục bộ trong `drive-reports/` và không đưa lên Git.
+
+## Gói bài học có dẫn nguồn
+
+`lesson_pack.py` chia phụ đề thành các đoạn có ID, đưa tài liệu đọc được cùng thư mục vào làm nguồn phụ, rồi tạo tóm tắt, mục tiêu, khái niệm, các bước thực hành, timeline và câu hỏi ôn tập. Các trích dẫn được đối chiếu với nguồn; kết quả cần xem lại được đánh dấu `needs_review`.
+
+```bash
+python3 lesson_pack.py --id ID_FILE_PHU_DE_TU_MANIFEST
+```
+
+Kết quả Markdown và JSON nằm trong `drive-reports/lesson-packs/` theo tên khóa/chương/bài. Chạy lại cùng nguồn sẽ dùng bản đã có; `--refresh` tạo lại và `--rerender` chỉ dựng lại Markdown từ JSON đã lưu. Chức năng này dùng phiên đăng nhập Codex CLI hiện tại và chỉ áp dụng cho bài có file phụ đề riêng.
 
 **Giới hạn hiện tại:** PDF chứa ảnh cần OCR. Drive API không có phương thức v3 để tải transcript đang hiện trong trình phát video, nên báo cáo không khẳng định video có hay không có transcript nhúng. Ghi chú AI cần kiểm tra lại các tên lệnh, API và thuật ngữ bị nhận dạng sai trong phụ đề.

@@ -91,8 +91,10 @@ def library() -> dict:
         if is_promotional_document(item) or doc_by_id.get(item["id"], {}).get("status") == "excluded":
             continue
         bucket = courses.setdefault(course, {"name": course, "videos": 0, "documents": 0, "captions": 0})
+        path_parts = item["path"].split("/")
+        chapter = " / ".join(path_parts[2:-1]) or "Bài học chưa chia chương"
         base = {"id": item["id"], "name": display_name(item["name"]), "path": item["path"],
-                "course": course, "url": item["url"], "size": item.get("size")}
+                "course": course, "chapter": chapter, "url": item["url"], "size": item.get("size")}
         if item["kind"] == "video":
             bucket["videos"] += 1
             companion = item.get("transcript_files", [])
@@ -133,6 +135,9 @@ def library() -> dict:
                        or (REPORTS / "study-notes" / f"{slug}.md").is_file()):
             notes.append({"id": slug, "name": title, "course": course,
                           "type": "study_note", "source": source})
+    if (REPORTS / "study-notes/index.md").is_file():
+        notes.append({"id": "index", "name": "Chỉ mục toàn bộ khóa học", "course": "Tất cả khóa học",
+                      "type": "study_index", "source": "index"})
     videos.sort(key=lambda row: row["path"].casefold())
     docs.sort(key=lambda row: row["path"].casefold())
     notes.sort(key=lambda row: row["name"].casefold())
@@ -192,6 +197,9 @@ def file_content(kind: str, file_id: str) -> dict | None:
         if path and not path.is_file():
             path = REPORTS / "study-notes" / f"{file_id}.md"
         title = file_id
+    elif kind == "study_index" and file_id == "index":
+        path = REPORTS / "study-notes/index.md"
+        title = "Chỉ mục toàn bộ khóa học"
     else:
         return None
     if path is None or not path.is_file() or path.stat().st_size > 2_000_000:

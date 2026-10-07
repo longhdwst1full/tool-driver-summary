@@ -1,5 +1,5 @@
 const initialView = ["overview", "videos", "documents", "notes", "activity"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "overview";
-const state = { pack: null, library: null, jobs: [], token: "", view: initialView, query: "", course: "", selected: null, lastJobs: "" };
+const state = { pack: null, library: null, jobs: [], token: "", view: initialView, query: "", course: "", videoCourse: "", selected: null, lastJobs: "" };
 const main = document.querySelector("#main");
 const drawer = document.querySelector("#drawer");
 const backdrop = document.querySelector("#drawer-backdrop");
@@ -68,8 +68,17 @@ function filtered(rows) {
 }
 
 function videos() {
-  const rows = filtered(state.library.videos);
-  return `${pageHead("THƯ VIỆN VIDEO", "Video bài học", "Mở video gốc, xem timeline phụ đề và tạo ghi chú có mốc thời gian.", `<button class="button button-outline" data-run="captions">↻ Đọc phụ đề</button>`)}${toolbar()}<section class="table-card"><div class="table-header"><strong>Danh sách video</strong><small>${number(rows.length)} / ${number(state.library.videos.length)} video</small></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Tên bài học</th><th>Khóa học</th><th>Phụ đề</th><th>Thời lượng</th><th></th></tr></thead><tbody>${rows.map(row => `<tr tabindex="0" role="button" data-open-kind="video" data-id="${esc(row.id)}"><td><div class="item-cell"><span class="file-icon">▷</span><div><strong title="${esc(row.name)}">${esc(row.name)}</strong><small title="${esc(row.path)}">${esc(row.path)}</small></div></div></td><td>${esc(row.course)}</td><td>${sourceTag(row)}</td><td>${duration(row.duration_ms)}</td><td class="row-arrow">›</td></tr>`).join("")}</tbody></table>${rows.length ? "" : `<div class="no-results">Không tìm thấy video phù hợp.</div>`}</div></section>`;
+  const all = state.library.videos;
+  const courses = [...new Set(all.map(row => row.course))].sort((a, b) => a.localeCompare(b, "vi", { numeric: true }));
+  const query = state.query.trim().toLocaleLowerCase("vi");
+  const intro = pageHead("THƯ VIỆN VIDEO", "Video theo khóa học", "Chọn khóa học, mở từng chương và chọn bài để xem phụ đề hoặc ghi chú.", `<button class="button button-outline" data-run="captions">↻ Đọc phụ đề</button>`);
+  if (!state.videoCourse || !courses.includes(state.videoCourse)) {
+    return `${intro}<div class="video-search"><label class="search"><span aria-hidden="true">⌕</span><input id="video-search" type="search" placeholder="Tìm khóa học hoặc bài học..." value="${esc(state.query)}" aria-label="Tìm video"></label><small>${number(courses.length)} khóa học · ${number(all.length)} video</small></div><div class="video-course-grid">${courses.filter(course => !query || course.toLocaleLowerCase("vi").includes(query) || all.some(row => row.course === course && `${row.name} ${row.chapter}`.toLocaleLowerCase("vi").includes(query))).map((course, index) => { const rows = all.filter(row => row.course === course); const chapters = new Set(rows.map(row => row.chapter)); return `<button type="button" class="video-course-card" data-video-course="${esc(course)}"><span class="course-icon">${String(index + 1).padStart(2, "0")}</span><strong>${esc(course)}</strong><span>${number(chapters.size)} chương · ${number(rows.length)} video</span><span class="course-enter">Mở khóa học →</span></button>`; }).join("") || `<div class="empty-state">Không tìm thấy khóa học phù hợp.</div>`}</div>`;
+  }
+  const courseRows = all.filter(row => row.course === state.videoCourse);
+  const rows = courseRows.filter(row => !query || `${row.name} ${row.chapter}`.toLocaleLowerCase("vi").includes(query));
+  const chapters = [...new Set(rows.map(row => row.chapter))].sort((a, b) => a.localeCompare(b, "vi", { numeric: true }));
+  return `${intro}<div class="video-breadcrumb"><button type="button" data-video-back>Khóa học</button><span>›</span><strong>${esc(state.videoCourse)}</strong></div><div class="video-search"><label class="search"><span aria-hidden="true">⌕</span><input id="video-search" type="search" placeholder="Tìm bài trong khóa học..." value="${esc(state.query)}" aria-label="Tìm bài học"></label><small>${number(rows.length)} / ${number(courseRows.length)} video · ${number(chapters.length)} chương</small></div><div class="chapter-list">${chapters.map((chapter, index) => { const lessons = rows.filter(row => row.chapter === chapter); return `<details class="chapter-card" ${query || chapters.length === 1 ? "open" : ""}><summary><span class="chapter-number">${String(index + 1).padStart(2, "0")}</span><strong>${esc(chapter)}</strong><span class="chapter-count">${number(lessons.length)} bài</span><span class="chapter-chevron">⌄</span></summary><div class="chapter-lessons">${lessons.map(row => `<button type="button" class="lesson-row" data-open-kind="video" data-id="${esc(row.id)}"><span class="file-icon">▷</span><span class="lesson-name"><strong>${esc(row.name)}</strong><small>${row.caption_id ? `${number(row.cue_count)} đoạn phụ đề` : "Chưa có phụ đề"}${row.lesson_pack ? " · Có gói bài học" : ""}</small></span><span class="lesson-duration">${duration(row.duration_ms)}</span><span class="row-arrow">›</span></button>`).join("")}</div></details>`; }).join("") || `<div class="empty-state">Không tìm thấy bài học phù hợp.</div>`}</div>`;
 }
 
 function documents() {
@@ -79,7 +88,7 @@ function documents() {
 
 function notes() {
   const rows = filtered(state.library.notes);
-  return `${pageHead("KIẾN THỨC ĐÃ LƯU", "Ghi chú học tập", "Bản tóm tắt có dẫn về phụ đề hoặc tài liệu nguồn.")}${toolbar()}<div class="note-grid">${rows.map(row => `<button type="button" class="note-card" data-open-kind="${esc(row.type)}" data-id="${esc(row.id)}"><span class="file-icon note">✦</span><h3>${esc(row.name)}</h3><p>${esc(row.course)} · ${row.type === "lesson_pack" ? (row.status === "ok" ? "Gói bài học" : "Gói bài học · cần xem lại") : row.type === "ai_note" ? "Ghi chú AI" : "Ghi chú mẫu"}</p><span class="bottom"><span>Đọc ghi chú</span><span>↗</span></span></button>`).join("")}</div>${rows.length ? "" : `<div class="empty-state">Chưa có ghi chú phù hợp. Mở một video có phụ đề để tạo ghi chú AI.</div>`}`;
+  return `${pageHead("KIẾN THỨC ĐÃ LƯU", "Ghi chú học tập", "Bản tóm tắt có dẫn về phụ đề hoặc tài liệu nguồn.")}${toolbar()}<div class="note-grid">${rows.map(row => `<button type="button" class="note-card" data-open-kind="${esc(row.type)}" data-id="${esc(row.id)}"><span class="file-icon note">✦</span><h3>${esc(row.name)}</h3><p>${esc(row.course)} · ${row.type === "lesson_pack" ? (row.status === "ok" ? "Gói bài học" : "Gói bài học · cần xem lại") : row.type === "ai_note" ? "Ghi chú AI" : row.type === "study_index" ? "Chỉ mục khóa học" : "Ghi chú mẫu"}</p><span class="bottom"><span>Đọc ghi chú</span><span>↗</span></span></button>`).join("")}</div>${rows.length ? "" : `<div class="empty-state">Chưa có ghi chú phù hợp. Mở một video có phụ đề để tạo ghi chú AI.</div>`}`;
 }
 
 function activity() {
@@ -94,14 +103,76 @@ function render() {
   const search = document.querySelector("#search-input");
   if (search) search.addEventListener("input", event => { const pos = event.target.selectionStart; state.query = event.target.value; render(); const input = document.querySelector("#search-input"); input.focus(); input.setSelectionRange(pos, pos); });
   document.querySelector("#course-select")?.addEventListener("change", event => { state.course = event.target.value; render(); });
+  document.querySelector("#video-search")?.addEventListener("input", event => { const position = event.target.selectionStart; state.query = event.target.value; render(); const input = document.querySelector("#video-search"); input.focus(); input.setSelectionRange(position, position); });
+}
+
+function markdownInline(value) {
+  const token = /(`[^`]+`|\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|\*[^*]+\*)/g;
+  return String(value).split(token).map(part => {
+    if (part.startsWith("`") && part.endsWith("`")) return `<code>${esc(part.slice(1, -1))}</code>`;
+    const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (link) {
+      const url = link[2].replace(/^<|>$/g, "");
+      try {
+        const parsed = new URL(url);
+        if (["https:", "http:"].includes(parsed.protocol)) return `<a href="${esc(parsed.href)}" target="_blank" rel="noopener noreferrer">${esc(link[1])}</a>`;
+      } catch { /* Local report paths stay as text in the web preview. */ }
+      return `<span title="Liên kết đến file cục bộ">${esc(link[1])}</span>`;
+    }
+    if (part.startsWith("**") && part.endsWith("**")) return `<strong>${esc(part.slice(2, -2))}</strong>`;
+    if (part.startsWith("*") && part.endsWith("*")) return `<em>${esc(part.slice(1, -1))}</em>`;
+    return esc(part);
+  }).join("");
+}
+
+function renderMarkdown(source) {
+  const lines = String(source).replace(/\r\n?/g, "\n").split("\n");
+  const out = [];
+  let list = "", inCode = false, code = [];
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = ""; } };
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index], trimmed = line.trim();
+    if (trimmed.startsWith("```")) {
+      closeList();
+      if (inCode) { out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`); code = []; }
+      inCode = !inCode; continue;
+    }
+    if (inCode) { code.push(line); continue; }
+    if (!trimmed) { closeList(); continue; }
+    if (/^\|?\s*:?-{3,}/.test(trimmed)) continue;
+    if (trimmed.includes("|") && index + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[index + 1])) {
+      closeList();
+      const cells = row => row.trim().replace(/^\||\|$/g, "").split(/(?<!\\)\|/).map(cell => cell.trim().replace(/\\\|/g, "|"));
+      const headers = cells(line);
+      out.push(`<div class="markdown-table-wrap"><table><thead><tr>${headers.map(cell => `<th>${markdownInline(cell)}</th>`).join("")}</tr></thead><tbody>`);
+      index += 1;
+      while (index + 1 < lines.length && lines[index + 1].trim().startsWith("|")) {
+        index += 1; out.push(`<tr>${cells(lines[index]).map(cell => `<td>${markdownInline(cell)}</td>`).join("")}</tr>`);
+      }
+      out.push("</tbody></table></div>"); continue;
+    }
+    const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) { closeList(); const level = Math.min(heading[1].length + 1, 6); out.push(`<h${level}>${markdownInline(heading[2])}</h${level}>`); continue; }
+    if (/^---+$/.test(trimmed)) { closeList(); out.push("<hr>"); continue; }
+    const bullet = trimmed.match(/^[-*+]\s+(.+)$/), numbered = trimmed.match(/^\d+[.)]\s+(.+)$/);
+    if (bullet || numbered) { const next = bullet ? "ul" : "ol"; if (list !== next) { closeList(); out.push(`<${next}>`); list = next; } out.push(`<li>${markdownInline((bullet || numbered)[1])}</li>`); continue; }
+    closeList();
+    if (trimmed.startsWith(">")) out.push(`<blockquote>${markdownInline(trimmed.replace(/^>\s?/, ""))}</blockquote>`);
+    else out.push(`<p>${markdownInline(trimmed)}</p>`);
+  }
+  closeList();
+  if (inCode) out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`);
+  return out.join("");
 }
 
 async function readFile(kind, id) {
   const reader = drawerContent.querySelector("#reader-content");
   const title = drawerContent.querySelector("#reader-title");
+  const markdown = drawerContent.querySelector("#markdown-content");
   if (!reader || !title) return;
   title.textContent = "Đang tải nội dung…";
   reader.textContent = "";
+  if (markdown) { markdown.hidden = true; markdown.innerHTML = ""; }
   try {
     const result = await api(`/api/file?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`);
     const packView = drawerContent.querySelector("#pack-content");
@@ -113,8 +184,9 @@ async function readFile(kind, id) {
     }
     if (packView) { packView.hidden = true; reader.hidden = false; }
     title.textContent = kind === "document" ? "Văn bản đã trích" : kind === "transcript" ? "Timeline phụ đề" : "Ghi chú";
-    reader.textContent = result.content;
-  } catch (error) { title.textContent = "Không mở được nội dung"; reader.textContent = error.message; }
+    if (kind !== "document" && markdown) { reader.hidden = true; markdown.hidden = false; markdown.innerHTML = renderMarkdown(result.content); }
+    else reader.textContent = result.content;
+  } catch (error) { title.textContent = "Không mở được nội dung"; reader.hidden = false; reader.textContent = error.message; }
 }
 
 function refChips(refs) {
@@ -162,14 +234,14 @@ function openDrawer(kind, id) {
   state.selected = { kind, id };
   const actions = kind === "video" ? `<a class="button button-outline" href="${esc(safeUrl(item.url))}" target="_blank" rel="noopener noreferrer">↗ Mở video Drive</a>${item.caption_id ? `<button class="button button-soft" data-reader-kind="transcript" data-reader-id="${esc(item.caption_id)}">≋ Xem phụ đề</button>${item.lesson_pack ? `<button class="button button-outline" data-reader-kind="lesson_pack" data-reader-id="${esc(item.caption_id)}">▣ Xem gói bài học</button>` : ""}<button class="button button-accent" data-run="lesson_pack" data-caption-id="${esc(item.caption_id)}">▣ ${item.lesson_pack ? "Tạo lại gói bài học" : "Tạo gói bài học"}</button><button class="button button-soft" data-run="note" data-caption-id="${esc(item.caption_id)}">✦ Tạo ghi chú AI</button>${item.has_ai_note ? `<button class="button button-outline" data-reader-kind="ai_note" data-reader-id="${esc(item.caption_id)}">Đọc ghi chú AI</button>` : ""}${item.has_manual_note ? `<button class="button button-outline" data-reader-kind="study_note" data-reader-id="14-admin">Ghi chú mẫu</button>` : ""}` : ""}`
     : kind === "document" ? `<a class="button button-outline" href="${esc(safeUrl(item.url))}" target="_blank" rel="noopener noreferrer">↗ Mở tài liệu Drive</a>${item.status === "ok" ? `<button class="button button-soft" data-reader-kind="document" data-reader-id="${esc(item.id)}">▤ Xem văn bản</button>` : ""}` : "";
-  const meta = kind === "video" ? `<span>${esc(item.course)}</span><span>${item.caption_id ? `${number(item.cue_count)} đoạn phụ đề · ${duration(item.duration_ms)}` : item.source_status === "asr_ready" ? "Chưa có phụ đề · tải được, chờ ASR" : "Không có phụ đề và không tải được video"}</span>`
+  const meta = kind === "video" ? `<span>${esc(item.course)} / ${esc(item.chapter)}</span><span>${item.caption_id ? `${number(item.cue_count)} đoạn phụ đề · ${duration(item.duration_ms)}` : item.source_status === "asr_ready" ? "Chưa có phụ đề · tải được, chờ ASR" : "Không có phụ đề và không tải được video"}</span>`
     : kind === "document" ? `<span>${esc(item.course)}</span><span>${bytes(item.size)} · ${item.status === "ok" ? `${number(item.characters)} ký tự` : item.status === "needs_ocr" ? "Cần OCR để lấy chữ" : "Chưa đọc được nội dung"}</span>`
-      : `<span>${esc(item.course)} · ${kind === "lesson_pack" ? "Gói bài học" : kind === "ai_note" ? "Ghi chú AI" : "Ghi chú mẫu"}</span>`;
-  drawerContent.innerHTML = `<div class="drawer-top"><strong>${kind === "video" ? "CHI TIẾT VIDEO" : kind === "document" ? "CHI TIẾT TÀI LIỆU" : kind === "lesson_pack" ? "GÓI BÀI HỌC" : "GHI CHÚ HỌC TẬP"}</strong><button type="button" class="icon-button" data-close aria-label="Đóng">×</button></div><div class="drawer-body"><h2>${esc(item.name)}</h2><div class="detail-meta">${meta}<span>${esc(item.path || "")}</span></div><div class="detail-actions">${actions}</div><section class="reader"><div class="reader-head"><span id="reader-title">Nội dung</span><span>${kind === "video" ? "Phụ đề / ghi chú" : kind === "document" ? "Tệp văn bản" : "Markdown"}</span></div><pre id="reader-content">${kind === "video" && !item.caption_id ? (item.source_status === "asr_ready" ? "Video chưa có phụ đề; có thể tạo bằng ASR khi bước này được bật." : "Video không có file phụ đề và chủ sở hữu không cho tải, nên không có nguồn văn bản để tạo ghi chú.") : kind === "document" && item.status !== "ok" ? "Tài liệu này chưa có văn bản để hiển thị." : "Đang tải nội dung…"}</pre><div id="pack-content" class="pack" hidden></div></section></div>`;
+      : `<span>${esc(item.course)} · ${kind === "lesson_pack" ? "Gói bài học" : kind === "ai_note" ? "Ghi chú AI" : kind === "study_index" ? "Chỉ mục khóa học" : "Ghi chú mẫu"}</span>`;
+  drawerContent.innerHTML = `<div class="drawer-top"><strong>${kind === "video" ? "CHI TIẾT VIDEO" : kind === "document" ? "CHI TIẾT TÀI LIỆU" : kind === "lesson_pack" ? "GÓI BÀI HỌC" : "GHI CHÚ HỌC TẬP"}</strong><button type="button" class="icon-button" data-close aria-label="Đóng">×</button></div><div class="drawer-body"><h2>${esc(item.name)}</h2><div class="detail-meta">${meta}<span>${esc(item.path || "")}</span></div><div class="detail-actions">${actions}</div><section class="reader"><div class="reader-head"><span id="reader-title">Nội dung</span><span>${kind === "video" ? "Phụ đề / ghi chú" : kind === "document" ? "Tệp văn bản" : "Markdown"}</span></div><pre id="reader-content">${kind === "video" && !item.caption_id ? (item.source_status === "asr_ready" ? "Video chưa có phụ đề; có thể tạo bằng ASR khi bước này được bật." : "Video không có file phụ đề và chủ sở hữu không cho tải, nên không có nguồn văn bản để tạo ghi chú.") : kind === "document" && item.status !== "ok" ? "Tài liệu này chưa có văn bản để hiển thị." : "Đang tải nội dung…"}</pre><div id="markdown-content" class="markdown-preview" hidden></div><div id="pack-content" class="pack" hidden></div></section></div>`;
   backdrop.hidden = false; drawer.classList.add("open"); drawer.setAttribute("aria-hidden", "false");
   if (kind === "video" && item.caption_id) readFile(item.lesson_pack ? "lesson_pack" : item.has_ai_note ? "ai_note" : "transcript", item.caption_id);
   else if (kind === "document" && item.status === "ok") readFile("document", item.id);
-  else if (kind === "ai_note" || kind === "study_note" || kind === "lesson_pack") readFile(kind, id);
+  else if (kind === "ai_note" || kind === "study_note" || kind === "study_index" || kind === "lesson_pack") readFile(kind, id);
 }
 function closeDrawer() { drawer.classList.remove("open"); drawer.setAttribute("aria-hidden", "true"); backdrop.hidden = true; state.selected = null; }
 
@@ -183,6 +255,8 @@ async function runJob(action, captionId) {
 
 document.addEventListener("click", event => {
   const close = event.target.closest("[data-close]"); if (close) { closeDrawer(); return; }
+  const back = event.target.closest("[data-video-back]"); if (back) { state.videoCourse = ""; state.query = ""; render(); return; }
+  const course = event.target.closest("[data-video-course]"); if (course) { state.videoCourse = course.dataset.videoCourse; state.query = ""; render(); main.focus(); return; }
   const nav = event.target.closest("[data-view]"); if (nav) { state.view = nav.dataset.view; location.hash = state.view; state.query = ""; state.course = ""; render(); main.focus(); return; }
   const quiz = event.target.closest("[data-quiz-opt]"); if (quiz) { answerQuiz(quiz); return; }
   const run = event.target.closest("[data-run]"); if (run) { runJob(run.dataset.run, run.dataset.captionId); return; }
