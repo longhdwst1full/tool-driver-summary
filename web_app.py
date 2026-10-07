@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from hashlib import sha1
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -17,7 +18,7 @@ from threading import Lock, Thread
 from urllib.parse import parse_qs, urlparse
 
 from drive_scan import video_source_status
-from output_layout import is_promotional_document, output_paths, safe_output_file
+from output_layout import is_promotional_document, natural_key, output_paths, safe_output_file
 from study_pack import manual_note_paths
 
 
@@ -70,6 +71,10 @@ def course_name(path: str) -> str:
 def display_name(name: str) -> str:
     clean = re.sub(r"\s*\(khoahocgiahoi\.com[^)]*\)(?=\.[^.]+$)", "", name, flags=re.I)
     return re.sub(r"\.(mp4|mov|mkv|webm|avi|m4v)$", "", clean, flags=re.I)
+
+
+def course_note_id(course: str) -> str:
+    return "course_" + sha1(course.encode("utf-8")).hexdigest()[:16]
 
 
 def library() -> dict:
@@ -138,8 +143,13 @@ def library() -> dict:
     if (REPORTS / "study-notes/index.md").is_file():
         notes.append({"id": "index", "name": "Chỉ mục toàn bộ khóa học", "course": "Tất cả khóa học",
                       "type": "study_index", "source": "index"})
-    videos.sort(key=lambda row: row["path"].casefold())
-    docs.sort(key=lambda row: row["path"].casefold())
+    for course in courses:
+        summary = safe_output_file(REPORTS / "courses", Path(course) / "course_summary.md", ".md")
+        if summary.is_file():
+            notes.append({"id": course_note_id(course), "name": f"Tổng hợp · {course}",
+                          "course": course, "type": "course_summary", "source": "course"})
+    videos.sort(key=lambda row: natural_key(row["path"]))
+    docs.sort(key=lambda row: natural_key(row["path"]))
     notes.sort(key=lambda row: row["name"].casefold())
     counts = dict(scan.get("counts", {}))
     counts["document"] = len(docs)
@@ -200,6 +210,10 @@ def file_content(kind: str, file_id: str) -> dict | None:
     elif kind == "study_index" and file_id == "index":
         path = REPORTS / "study-notes/index.md"
         title = "Chỉ mục toàn bộ khóa học"
+    elif kind == "course_summary":
+        note = next((row for row in library()["notes"] if row["type"] == kind and row["id"] == file_id), None)
+        path = safe_output_file(REPORTS / "courses", Path(note["course"]) / "course_summary.md", ".md") if note else None
+        title = note["name"] if note else ""
     else:
         return None
     if path is None or not path.is_file() or path.stat().st_size > 2_000_000:
@@ -214,7 +228,7 @@ def command_for(action: str, caption_id: str | None = None) -> list[str]:
     if action == "captions":
         return base + ["drive_process.py"]
     if action == "documents":
-        return base + ["drive_documents.py", "--max-mb", "30"]
+        return base + ["drive_documents.py", "--max-mb", "30", "--ocr"]
     if action in {"note", "lesson_pack"} and isinstance(caption_id, str) and SAFE_ID.fullmatch(caption_id):
         manifest = read_json(REPORTS / "transcripts/manifest.json")
         if any(row["id"] == caption_id and row["status"] == "ok" for row in manifest.get("files", [])):

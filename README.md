@@ -2,6 +2,8 @@
 
 Công cụ quản lý nội dung học tập từ Google Drive trên máy cá nhân: quét video và tài liệu, đọc phụ đề, trích văn bản, tạo ghi chú có mốc thời gian và xem kết quả qua giao diện web. Dự án cũng có demo offline không cần tài khoản Google.
 
+Xem [đặc tả dữ liệu và tiêu chí kiểm tra](SPECIFICATION.md) cùng [kiến trúc và tiến độ](ARCHITECTURE.md).
+
 ## Giao diện web quản lý
 
 Sau khi đã quét Drive, mở giao diện trên máy:
@@ -50,13 +52,14 @@ PYTHONPATH=.deps python3 drive_process.py
 
 Kết quả theo từng file nằm trong `drive-reports/transcripts/<tên khóa học>/<tên chương>/<tên video>.md`; `manifest.json` ghi số đoạn, thời lượng và lỗi nếu có. Phần đầu mỗi file Markdown chỉ là 5 đoạn phụ đề đầu để kiểm tra, chưa phải bản tóm tắt toàn bài bằng AI.
 
-Đọc văn bản từ các tài liệu PDF, DOCX và TXT trong báo cáo quét:
+Đọc văn bản từ các tài liệu PDF, DOCX, PPTX và TXT trong báo cáo quét:
 
 ```bash
 PYTHONPATH=.deps python3 drive_documents.py --max-mb 30
+PYTHONPATH=.deps python3 drive_documents.py --max-mb 30 --ocr
 ```
 
-Kết quả nằm trong `drive-reports/documents/<tên khóa học>/<tên chương>/<tên tài liệu>.txt`. `manifest.json` được lưu sau từng file, ghi số ký tự, mã băm nội dung và trạng thái `needs_ocr` nếu PDF không trích được chữ. Các tài liệu quảng cáo “Các khóa học thuộc về Khóa học giá hời” được đánh dấu `excluded`, không tải lại và không xuất hiện trong thư viện học tập. Lần chạy sau dùng lại những file đã đọc thành công; dùng `--refresh` để tải lại. `--max-mb` đặt giới hạn kích thước từng tài liệu; file lớn được tải theo từng phần.
+Kết quả nằm trong `drive-reports/documents/<tên khóa học>/<tên chương>/<tên tài liệu>.txt`. `manifest.json` được lưu sau từng file, ghi số ký tự, mã băm nội dung và trạng thái `needs_ocr` nếu PDF không trích được chữ. Thêm `--ocr` để xử lý PDF ảnh bằng Tesseract cùng gói ngôn ngữ `vie` và `eng` (cài `tesseract-ocr tesseract-ocr-vie tesseract-ocr-eng` trên Linux). Các tài liệu quảng cáo “Các khóa học thuộc về Khóa học giá hời” được đánh dấu `excluded`, không tải lại và không xuất hiện trong thư viện học tập. Lần chạy sau dùng lại những file đã đọc thành công; dùng `--refresh` để tải lại. `--max-mb` đặt giới hạn kích thước từng tài liệu; file lớn được tải theo từng phần.
 
 Tạo lại chỉ mục liên kết video, phụ đề, tài liệu và ghi chú của mọi khóa học:
 
@@ -85,8 +88,35 @@ Script tự tìm Codex CLI trong tiện ích VS Code nếu lệnh `codex` không
 
 ```bash
 python3 lesson_pack.py --id ID_FILE_PHU_DE_TU_MANIFEST
+python3 batch_lessons.py
+python3 lesson_artifacts.py
 ```
 
-Kết quả Markdown và JSON nằm trong `drive-reports/lesson-packs/` theo tên khóa/chương/bài. Chạy lại cùng nguồn sẽ dùng bản đã có; `--refresh` tạo lại và `--rerender` chỉ dựng lại Markdown từ JSON đã lưu. Chức năng này dùng phiên đăng nhập Codex CLI hiện tại và chỉ áp dụng cho bài có file phụ đề riêng.
+Kết quả Markdown và JSON nằm trong `drive-reports/lesson-packs/` theo tên khóa/chương/bài. `lesson_artifacts.py` tách các bài QA `ok` thành `transcript.md`, `summary.md`, `deep_notes.md`, `concepts.json`, `timeline.json`, `quiz.json`, `metadata.json` trong `drive-reports/lesson-artifacts/`. Chạy lại cùng nguồn sẽ dùng bản đã có; `--refresh` tạo lại và `--rerender` chỉ dựng lại Markdown từ JSON đã lưu. Chức năng này dùng phiên đăng nhập Codex CLI hiện tại và chỉ áp dụng cho bài có file phụ đề riêng.
 
-**Giới hạn hiện tại:** PDF chứa ảnh cần OCR. Drive API không có phương thức v3 để tải transcript đang hiện trong trình phát video, nên báo cáo không khẳng định video có hay không có transcript nhúng. Ghi chú AI cần kiểm tra lại các tên lệnh, API và thuật ngữ bị nhận dạng sai trong phụ đề.
+## Tổng hợp khóa học, tìm kiếm và NotebookLM
+
+Sau khi batch tạo bài hoàn tất, chạy một lệnh để kiểm toán và tạo lại toàn bộ đầu ra:
+
+```bash
+python3 finalize_pipeline.py
+```
+
+Có thể chạy từng bước khi cần:
+
+```bash
+python3 course_synthesis.py
+python3 qa_report.py
+python3 knowledge_search.py build
+python3 knowledge_search.py search 'từ khóa cần tìm' --limit 5
+python3 knowledge_search.py ask 'Câu hỏi về khóa học?'
+python3 notebook_export.py
+```
+
+`course_synthesis.py` tạo `course_summary.md`, `course_map.json`, `concept_graph.json`, `learning_path.md`, `master_notes.md` và `course_quiz.json` trong `drive-reports/courses/<tên khóa>/`. Công cụ chỉ tổng hợp bài đã qua QA, giữ ID đoạn nguồn trong JSON và đánh dấu các định nghĩa khác nhau để người dùng đối chiếu. Bản tổng hợp xuất hiện trong mục **Ghi chú** trên web.
+
+`knowledge_search.py` tạo chỉ mục SQLite FTS5 cục bộ từ đoạn nguồn của các bài đã qua QA. Lệnh `ask` dùng Codex CLI để trả lời và từ chối ID trích dẫn không có trong các đoạn truy xuất. Chỉ mục cần xây lại sau khi có thêm bài. `notebook_export.py` tạo thư mục Markdown theo khóa ở `drive-reports/notebooklm-export/`; `manifest.json` còn liệt kê link tài liệu gốc đi kèm. Nhập các nguồn này bằng giao diện NotebookLM bằng tài khoản của bạn. Dự án chưa tự tải nội dung lên NotebookLM.
+
+Lệnh `batch_lessons.py` có thể chạy lại sau khi gián đoạn; bài có nguồn và prompt không đổi sẽ được dùng lại. Dùng `--course 'Tên khóa'` hoặc `--limit 3` để thử một phần trước khi xử lý toàn bộ.
+
+**Giới hạn hiện tại:** Video chủ sở hữu tắt quyền tải không thể đưa qua ASR. Drive API không có phương thức v3 để tải transcript đang hiện trong trình phát video, nên báo cáo không khẳng định video có hay không có transcript nhúng. OCR có thể nhận dạng sai ký tự, cần đối chiếu lại với PDF gốc. QA tự động xác minh trích dẫn và độ phủ phụ đề; độ chính xác ngữ nghĩa và tính dễ đọc vẫn cần người học xem lại. Ghi chú AI cần kiểm tra lại tên lệnh, API và thuật ngữ bị nhận dạng sai trong phụ đề.

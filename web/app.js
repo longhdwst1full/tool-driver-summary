@@ -88,7 +88,7 @@ function documents() {
 
 function notes() {
   const rows = filtered(state.library.notes);
-  return `${pageHead("KIẾN THỨC ĐÃ LƯU", "Ghi chú học tập", "Bản tóm tắt có dẫn về phụ đề hoặc tài liệu nguồn.")}${toolbar()}<div class="note-grid">${rows.map(row => `<button type="button" class="note-card" data-open-kind="${esc(row.type)}" data-id="${esc(row.id)}"><span class="file-icon note">✦</span><h3>${esc(row.name)}</h3><p>${esc(row.course)} · ${row.type === "lesson_pack" ? (row.status === "ok" ? "Gói bài học" : "Gói bài học · cần xem lại") : row.type === "ai_note" ? "Ghi chú AI" : row.type === "study_index" ? "Chỉ mục khóa học" : "Ghi chú mẫu"}</p><span class="bottom"><span>Đọc ghi chú</span><span>↗</span></span></button>`).join("")}</div>${rows.length ? "" : `<div class="empty-state">Chưa có ghi chú phù hợp. Mở một video có phụ đề để tạo ghi chú AI.</div>`}`;
+  return `${pageHead("KIẾN THỨC ĐÃ LƯU", "Ghi chú học tập", "Bản tóm tắt có dẫn về phụ đề hoặc tài liệu nguồn.")}${toolbar()}<div class="note-grid">${rows.map(row => `<button type="button" class="note-card" data-open-kind="${esc(row.type)}" data-id="${esc(row.id)}"><span class="file-icon note">✦</span><h3>${esc(row.name)}</h3><p>${esc(row.course)} · ${row.type === "lesson_pack" ? (row.status === "ok" ? "Gói bài học" : "Gói bài học · cần xem lại") : row.type === "course_summary" ? "Tổng hợp khóa học" : row.type === "ai_note" ? "Ghi chú AI" : row.type === "study_index" ? "Chỉ mục khóa học" : "Ghi chú mẫu"}</p><span class="bottom"><span>Đọc ghi chú</span><span>↗</span></span></button>`).join("")}</div>${rows.length ? "" : `<div class="empty-state">Chưa có ghi chú phù hợp. Mở một video có phụ đề để tạo ghi chú AI.</div>`}`;
 }
 
 function activity() {
@@ -241,7 +241,7 @@ function openDrawer(kind, id) {
   backdrop.hidden = false; drawer.classList.add("open"); drawer.setAttribute("aria-hidden", "false");
   if (kind === "video" && item.caption_id) readFile(item.lesson_pack ? "lesson_pack" : item.has_ai_note ? "ai_note" : "transcript", item.caption_id);
   else if (kind === "document" && item.status === "ok") readFile("document", item.id);
-  else if (kind === "ai_note" || kind === "study_note" || kind === "study_index" || kind === "lesson_pack") readFile(kind, id);
+  else if (kind === "ai_note" || kind === "study_note" || kind === "study_index" || kind === "lesson_pack" || kind === "course_summary") readFile(kind, id);
 }
 function closeDrawer() { drawer.classList.remove("open"); drawer.setAttribute("aria-hidden", "true"); backdrop.hidden = true; state.selected = null; }
 

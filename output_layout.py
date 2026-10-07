@@ -15,6 +15,11 @@ LOCALE_SUFFIX = re.compile(r"[ _.-]+(?:vi(?:[_-]vn)?|en(?:[_-]us)?)$", re.I)
 INVALID_CHARACTERS = re.compile(r"[\\/<>:\"|?*\x00-\x1f]")
 
 
+def natural_key(value: str) -> tuple:
+    """Sort numbered chapters and lessons as 1, 2, 10 instead of 1, 10, 2."""
+    return tuple(int(part) if part.isdigit() else part.casefold() for part in re.split(r"(\d+)", value))
+
+
 def is_promotional_document(item: dict, content: str | None = None) -> bool:
     if item.get("kind") != "document":
         return False

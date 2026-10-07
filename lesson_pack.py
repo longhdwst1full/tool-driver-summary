@@ -19,7 +19,7 @@ from llm_client import CodexCLIClient, LLMClient, Prompt, find_codex
 from output_layout import output_paths, safe_output_file, video_title
 
 
-MIN_COVERAGE = 0.8
+MIN_COVERAGE = 0.85
 MIN_QUOTE_CHARS = 8
 DOC_CHUNK_CHARS = 3000
 DOC_BUDGET_CHARS = 12000
