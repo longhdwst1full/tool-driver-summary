@@ -36,6 +36,8 @@ class WebAppTests(unittest.TestCase):
             self.assertEqual(len(data["videos"]), 1)
             self.assertEqual(len(data["documents"]), 1)
             self.assertEqual(data["videos"][0]["caption_id"], "caption1")
+            self.assertEqual(data["videos"][0]["source_status"], "caption_file")
+            self.assertEqual(data["processed"]["sources"], {"caption_file": 1, "asr_ready": 0, "no_source": 0})
             self.assertNotIn("token", json.dumps(data))
             self.assertEqual(file_content("transcript", "caption1")["content"], "# Timeline")
 

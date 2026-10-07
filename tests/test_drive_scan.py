@@ -1,6 +1,7 @@
 import unittest
 
-from drive_scan import file_kind, folder_id_from, report_markdown, scan_folder, transcript_key
+from drive_scan import (file_kind, folder_id_from, report_markdown, scan_folder, transcript_key,
+                        video_source_status)
 
 
 ROOT = "1FolderRoot12345"
@@ -90,6 +91,15 @@ class DriveScanTests(unittest.TestCase):
             transcript_key("1. Giới thiệu (example.com zalo 123).mp4"),
             transcript_key("1. Giới thiệu.vi_VN.srt"),
         )
+
+    def test_video_source_status(self):
+        self.assertEqual(video_source_status({"transcript_files": [{"id": "c"}], "can_download": False}),
+                         "caption_file")
+        self.assertEqual(video_source_status({"transcript_files": [], "can_download": True}), "asr_ready")
+        self.assertEqual(video_source_status({"can_download": False}), "no_source")
+        self.assertEqual(video_source_status({"can_download": None}), "no_source")
+        self.assertEqual(video_source_status({"transcript_files": [{"id": "c"}]}, has_caption=False),
+                         "no_source")
 
 
 if __name__ == "__main__":

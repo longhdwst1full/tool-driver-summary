@@ -16,6 +16,7 @@ import sys
 from threading import Lock, Thread
 from urllib.parse import parse_qs, urlparse
 
+from drive_scan import video_source_status
 from output_layout import is_promotional_document, output_paths, safe_output_file
 from study_pack import manual_note_paths
 
@@ -82,6 +83,7 @@ def library() -> dict:
             if transcript:
                 bucket["captions"] += 1
             video = {**base, "caption_id": transcript["id"] if transcript else None,
+                     "source_status": video_source_status(item, has_caption=transcript is not None),
                      "cue_count": transcript.get("cue_count") if transcript else None,
                      "duration_ms": transcript.get("duration_ms") if transcript else None,
                      "has_ai_note": bool(transcript and (
@@ -120,6 +122,8 @@ def library() -> dict:
             "processed": {"captions": captions.get("ok", 0),
                           "documents": sum(row["status"] == "ok" for row in docs),
                           "excluded": documents.get("excluded", 0),
+                          "sources": {status: sum(row["source_status"] == status for row in videos)
+                                      for status in ("caption_file", "asr_ready", "no_source")},
                           "needs_ocr": sum(row["status"] == "needs_ocr" for row in docs)}}
 
 

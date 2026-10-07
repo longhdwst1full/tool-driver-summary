@@ -62,6 +62,15 @@ def file_kind(item: dict) -> str:
     return "other"
 
 
+def video_source_status(item: dict, has_caption: bool | None = None) -> str:
+    """Text source available for a video: caption file, downloadable for ASR, or none."""
+    if has_caption is None:
+        has_caption = bool(item.get("transcript_files"))
+    if has_caption:
+        return "caption_file"
+    return "asr_ready" if item.get("can_download") is True else "no_source"
+
+
 def transcript_key(name: str) -> str:
     stem = Path(name).stem.casefold()
     stem = re.sub(r"\s*\([^)]*\)\s*$", "", stem)
@@ -135,6 +144,7 @@ def scan_folder(service, folder_id: str, max_files: int = 500) -> dict:
             companions = by_parent_and_key.get((row["parent_id"], transcript_key(row["name"])), [])
             row["transcript_files"] = [{"id": x["id"], "name": x["name"]} for x in companions]
             row["embedded_transcript"] = "chưa thể xác định qua Drive API"
+            row["source_status"] = video_source_status(row)
 
     items.sort(key=lambda row: row["path"].casefold())
     counts = Counter(row["kind"] for row in items)
