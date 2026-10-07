@@ -36,6 +36,24 @@ def read_json(path: Path, fallback: dict | None = None) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def lesson_pack_file(scan: dict, caption_id: str, extension: str) -> Path | None:
+    relative = output_paths(scan, "ai_note").get(caption_id)
+    if relative is None:
+        return None
+    return safe_output_file(REPORTS / "lesson-packs", relative.with_suffix(extension), extension)
+
+
+def lesson_pack_summary(scan: dict, caption_id: str) -> dict | None:
+    path = lesson_pack_file(scan, caption_id, ".json")
+    if path is None or not path.is_file():
+        return None
+    try:
+        qa = json.loads(path.read_text(encoding="utf-8")).get("qa", {})
+    except (OSError, ValueError):
+        return {"status": "error", "coverage": None}
+    return {"status": qa.get("status", "error"), "coverage": qa.get("coverage")}
+
+
 def configured_folder_id() -> str:
     scan = read_json(REPORTS / "scan.json")
     folder_id = scan.get("folder", {}).get("id") or os.environ.get("DRIVE_FOLDER_ID", "")
@@ -84,6 +102,7 @@ def library() -> dict:
                 bucket["captions"] += 1
             video = {**base, "caption_id": transcript["id"] if transcript else None,
                      "source_status": video_source_status(item, has_caption=transcript is not None),
+                     "lesson_pack": lesson_pack_summary(scan, transcript["id"]) if transcript else None,
                      "cue_count": transcript.get("cue_count") if transcript else None,
                      "duration_ms": transcript.get("duration_ms") if transcript else None,
                      "has_ai_note": bool(transcript and (
@@ -94,6 +113,9 @@ def library() -> dict:
                                              and (safe_output_file(REPORTS / "study-notes", manual_paths["14-admin"], ".md").is_file()
                                                   or (REPORTS / "study-notes/14-admin.md").is_file()))}
             videos.append(video)
+            if video["lesson_pack"]:
+                notes.append({"id": transcript["id"], "name": base["name"], "course": course,
+                              "type": "lesson_pack", "source": "video", "status": video["lesson_pack"]["status"]})
             if video["has_ai_note"]:
                 notes.append({"id": transcript["id"], "name": base["name"], "course": course,
                               "type": "ai_note", "source": "video"})
@@ -124,7 +146,8 @@ def library() -> dict:
                           "excluded": documents.get("excluded", 0),
                           "sources": {status: sum(row["source_status"] == status for row in videos)
                                       for status in ("caption_file", "asr_ready", "no_source")},
-                          "needs_ocr": sum(row["status"] == "needs_ocr" for row in docs)}}
+                          "needs_ocr": sum(row["status"] == "needs_ocr" for row in docs),
+                          "lesson_packs": sum(bool(row["lesson_pack"]) for row in videos)}}
 
 
 def file_content(kind: str, file_id: str) -> dict | None:
@@ -152,6 +175,16 @@ def file_content(kind: str, file_id: str) -> dict | None:
         else:
             path = None
         title = row["name"] if row else ""
+    elif kind == "lesson_pack":
+        manifest = read_json(REPORTS / "transcripts/manifest.json")
+        row = next((x for x in manifest.get("files", []) if x["id"] == file_id and x["status"] == "ok"), None)
+        path = lesson_pack_file(read_json(REPORTS / "scan.json"), file_id, ".json") if row else None
+        if path is None or not path.is_file() or path.stat().st_size > 2_000_000:
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+        chunks = [{key: chunk.get(key) for key in ("chunk_id", "start", "end")} for chunk in data.get("chunks", [])]
+        return {"title": row["name"], "kind": kind, "pack": data.get("pack", {}), "qa": data.get("qa", {}),
+                "meta": data.get("meta", {}), "chunks": chunks}
     elif kind == "study_note" and file_id in {"14-admin", "claude-ai-hieu-qua"}:
         scan = read_json(REPORTS / "scan.json")
         relative = manual_note_paths(scan).get(file_id)
@@ -174,10 +207,11 @@ def command_for(action: str, caption_id: str | None = None) -> list[str]:
         return base + ["drive_process.py"]
     if action == "documents":
         return base + ["drive_documents.py", "--max-mb", "30"]
-    if action == "note" and isinstance(caption_id, str) and SAFE_ID.fullmatch(caption_id):
+    if action in {"note", "lesson_pack"} and isinstance(caption_id, str) and SAFE_ID.fullmatch(caption_id):
         manifest = read_json(REPORTS / "transcripts/manifest.json")
         if any(row["id"] == caption_id and row["status"] == "ok" for row in manifest.get("files", [])):
-            return base + ["codex_notes.py", "--id", caption_id]
+            script = "codex_notes.py" if action == "note" else "lesson_pack.py"
+            return base + [script, "--id", caption_id]
     raise ValueError("Tác vụ hoặc ID phụ đề không hợp lệ")
 
 
@@ -209,7 +243,8 @@ def start_job(action: str, caption_id: str | None = None) -> dict:
                                               stderr=subprocess.STDOUT, timeout=120, check=False)
                 output = (output + "\n" + index_result.stdout)[-6000:]
                 exit_code = index_result.returncode
-            status = "done" if exit_code == 0 else "failed"
+            # lesson_pack.py exits 2 when the pack was saved but still needs human review
+            status = "done" if exit_code == 0 or (action == "lesson_pack" and exit_code == 2) else "failed"
         except subprocess.TimeoutExpired:
             output, status, exit_code = "Tác vụ vượt thời hạn 30 phút.", "failed", -1
         except OSError as exc:

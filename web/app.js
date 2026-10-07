@@ -1,11 +1,11 @@
 const initialView = ["overview", "videos", "documents", "notes", "activity"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "overview";
-const state = { library: null, jobs: [], token: "", view: initialView, query: "", course: "", selected: null, lastJobs: "" };
+const state = { pack: null, library: null, jobs: [], token: "", view: initialView, query: "", course: "", selected: null, lastJobs: "" };
 const main = document.querySelector("#main");
 const drawer = document.querySelector("#drawer");
 const backdrop = document.querySelector("#drawer-backdrop");
 const drawerContent = document.querySelector("#drawer-content");
 const labels = { overview: "Tổng quan", videos: "Video bài học", documents: "Tài liệu", notes: "Ghi chú", activity: "Hoạt động" };
-const jobLabels = { scan: "Quét lại Drive", captions: "Đọc phụ đề", documents: "Đọc tài liệu", note: "Tạo ghi chú AI" };
+const jobLabels = { scan: "Quét lại Drive", captions: "Đọc phụ đề", documents: "Đọc tài liệu", note: "Tạo ghi chú AI", lesson_pack: "Tạo gói bài học" };
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
@@ -29,8 +29,13 @@ function metric(title, value, caption, icon) {
 function pageHead(eyebrow, title, description, actions = "") {
   return `<div class="page-heading"><div><div class="eyebrow">${esc(eyebrow)}</div><h1>${esc(title)}</h1><p>${esc(description)}</p></div>${actions ? `<div class="heading-actions">${actions}</div>` : ""}</div>`;
 }
+function packTag(pack) {
+  if (!pack) return "";
+  const pct = pack.coverage == null ? "" : ` · ${Math.round(pack.coverage * 100)}%`;
+  return pack.status === "ok" ? `<span class="tag blue">▣ Gói bài học${pct}</span>` : `<span class="tag warn">▣ Cần xem lại${pct}</span>`;
+}
 function sourceTag(row) {
-  if (row.caption_id) return `<span class="tag">● ${number(row.cue_count)} đoạn</span>`;
+  if (row.caption_id) return `<span class="tag">● ${number(row.cue_count)} đoạn</span> ${packTag(row.lesson_pack)}`;
   if (row.source_status === "asr_ready") return `<span class="tag blue">◌ Chờ ASR</span>`;
   return `<span class="tag muted">Không có nguồn văn bản</span>`;
 }
@@ -50,7 +55,7 @@ function overview() {
     <section class="hero"><div class="hero-content"><span class="hero-label">BỘ SƯU TẬP CỦA BẠN</span><h2>Học tập có hệ thống, từ video đến ghi chú.</h2><p>Xem tiến độ đọc phụ đề, tài liệu và mở lại đúng nguồn cho từng bài học. Mọi tác vụ chỉ chạy khi bạn yêu cầu.</p></div><div class="hero-art" aria-hidden="true"><div class="sheet"></div><div class="sheet two"></div></div></section>
     <div class="metric-grid">${metric("Video", count.video, "Trong thư mục và các thư mục con", "▷")}${metric("Tài liệu", count.document, `${data.processed.documents} đã trích văn bản`, "▤")}${metric("Phụ đề riêng", count.transcript, `${data.processed.captions} đã đọc`, "≋")}${metric("Ghi chú", data.notes.length, "Ghi chú AI và mẫu hiện có", "✦")}</div>
     <div class="two-columns"><section class="panel"><div class="panel-header"><div><h3>Khóa học trong thư mục</h3><span>${data.courses.length} khóa có video hoặc tài liệu</span></div><button class="panel-link" data-view="videos">Xem video →</button></div>${featured.map((course, i) => `<div class="course-row"><span class="course-icon">${String(i + 1).padStart(2, "0")}</span><div class="course-info"><strong title="${esc(course.name)}">${esc(course.name)}</strong><small>${number(course.captions)} phụ đề · ${number(course.documents)} tài liệu</small></div><span class="count">${number(course.videos)} video</span></div>`).join("") || `<div class="empty-state">Chưa có báo cáo quét Drive.</div>`}</section>
-    <section class="panel"><div class="panel-header"><div><h3>Tiến độ xử lý</h3><span>Từ dữ liệu đã quét</span></div></div><div class="progress-block"><div class="progress-row"><div class="progress-label"><span>Video có phụ đề riêng đã đọc</span><strong>${number(data.processed.captions)} / ${number(count.video)}</strong></div><progress class="progress-meter" value="${data.processed.captions}" max="${count.video || 1}"></progress></div><div class="progress-row"><div class="progress-label"><span>Tài liệu đã trích văn bản</span><strong>${number(data.processed.documents)} / ${number(count.document)}</strong></div><progress class="progress-meter blue" value="${data.processed.documents}" max="${count.document || 1}"></progress></div><div class="progress-row"><div class="progress-label"><span>Video tải được, chờ ASR</span><strong>${number(data.processed.sources?.asr_ready)}</strong></div></div><div class="progress-row"><div class="progress-label"><span>Video không có nguồn văn bản</span><strong>${number(data.processed.sources?.no_source)}</strong></div></div><div class="progress-row"><div class="progress-label"><span>Tài liệu cần OCR</span><strong>${number(data.processed.needs_ocr)}</strong></div></div></div><div class="quick-actions"><button class="button button-soft" data-run="captions">≋ &nbsp; Đọc lại file phụ đề</button><button class="button button-soft" data-run="documents">▤ &nbsp; Đọc lại tài liệu</button></div></section></div>`;
+    <section class="panel"><div class="panel-header"><div><h3>Tiến độ xử lý</h3><span>Từ dữ liệu đã quét</span></div></div><div class="progress-block"><div class="progress-row"><div class="progress-label"><span>Video có phụ đề riêng đã đọc</span><strong>${number(data.processed.captions)} / ${number(count.video)}</strong></div><progress class="progress-meter" value="${data.processed.captions}" max="${count.video || 1}"></progress></div><div class="progress-row"><div class="progress-label"><span>Tài liệu đã trích văn bản</span><strong>${number(data.processed.documents)} / ${number(count.document)}</strong></div><progress class="progress-meter blue" value="${data.processed.documents}" max="${count.document || 1}"></progress></div><div class="progress-row"><div class="progress-label"><span>Gói bài học đã tạo</span><strong>${number(data.processed.lesson_packs)} / ${number(data.processed.captions)}</strong></div><progress class="progress-meter" value="${data.processed.lesson_packs || 0}" max="${data.processed.captions || 1}"></progress></div><div class="progress-row"><div class="progress-label"><span>Video tải được, chờ ASR</span><strong>${number(data.processed.sources?.asr_ready)}</strong></div></div><div class="progress-row"><div class="progress-label"><span>Video không có nguồn văn bản</span><strong>${number(data.processed.sources?.no_source)}</strong></div></div><div class="progress-row"><div class="progress-label"><span>Tài liệu cần OCR</span><strong>${number(data.processed.needs_ocr)}</strong></div></div></div><div class="quick-actions"><button class="button button-soft" data-run="captions">≋ &nbsp; Đọc lại file phụ đề</button><button class="button button-soft" data-run="documents">▤ &nbsp; Đọc lại tài liệu</button></div></section></div>`;
 }
 
 function toolbar() {
@@ -74,7 +79,7 @@ function documents() {
 
 function notes() {
   const rows = filtered(state.library.notes);
-  return `${pageHead("KIẾN THỨC ĐÃ LƯU", "Ghi chú học tập", "Bản tóm tắt có dẫn về phụ đề hoặc tài liệu nguồn.")}${toolbar()}<div class="note-grid">${rows.map(row => `<button type="button" class="note-card" data-open-kind="${esc(row.type)}" data-id="${esc(row.id)}"><span class="file-icon note">✦</span><h3>${esc(row.name)}</h3><p>${esc(row.course)} · ${row.type === "ai_note" ? "Ghi chú AI" : "Ghi chú mẫu"}</p><span class="bottom"><span>Đọc ghi chú</span><span>↗</span></span></button>`).join("")}</div>${rows.length ? "" : `<div class="empty-state">Chưa có ghi chú phù hợp. Mở một video có phụ đề để tạo ghi chú AI.</div>`}`;
+  return `${pageHead("KIẾN THỨC ĐÃ LƯU", "Ghi chú học tập", "Bản tóm tắt có dẫn về phụ đề hoặc tài liệu nguồn.")}${toolbar()}<div class="note-grid">${rows.map(row => `<button type="button" class="note-card" data-open-kind="${esc(row.type)}" data-id="${esc(row.id)}"><span class="file-icon note">✦</span><h3>${esc(row.name)}</h3><p>${esc(row.course)} · ${row.type === "lesson_pack" ? (row.status === "ok" ? "Gói bài học" : "Gói bài học · cần xem lại") : row.type === "ai_note" ? "Ghi chú AI" : "Ghi chú mẫu"}</p><span class="bottom"><span>Đọc ghi chú</span><span>↗</span></span></button>`).join("")}</div>${rows.length ? "" : `<div class="empty-state">Chưa có ghi chú phù hợp. Mở một video có phụ đề để tạo ghi chú AI.</div>`}`;
 }
 
 function activity() {
@@ -99,9 +104,53 @@ async function readFile(kind, id) {
   reader.textContent = "";
   try {
     const result = await api(`/api/file?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`);
+    const packView = drawerContent.querySelector("#pack-content");
+    if (kind === "lesson_pack") {
+      title.textContent = "Gói bài học";
+      state.pack = result;
+      reader.hidden = true; packView.hidden = false; packView.innerHTML = renderPack(result);
+      return;
+    }
+    if (packView) { packView.hidden = true; reader.hidden = false; }
     title.textContent = kind === "document" ? "Văn bản đã trích" : kind === "transcript" ? "Timeline phụ đề" : "Ghi chú";
     reader.textContent = result.content;
   } catch (error) { title.textContent = "Không mở được nội dung"; reader.textContent = error.message; }
+}
+
+function refChips(refs) {
+  const spans = [...new Set((refs || []).map(ref => ref.at).filter(Boolean))];
+  return spans.map(at => `<span class="ref-chip">${esc(at)}</span>`).join("");
+}
+function quotes(refs) {
+  if (!refs || !refs.length) return "";
+  return `<details class="quotes"><summary>Trích nguồn (${refs.length})</summary>${refs.map(ref => `<blockquote><span class="ref-chip">${esc(ref.at || ref.chunk_id)}</span> “${esc(ref.quote)}”</blockquote>`).join("")}</details>`;
+}
+function renderPack(result) {
+  const pack = result.pack || {}, qa = result.qa || {}, meta = result.meta || {};
+  const spans = Object.fromEntries((result.chunks || []).map(c => [c.chunk_id, `${c.start}–${c.end}`]));
+  const coverage = qa.coverage == null ? "—" : `${Math.round(qa.coverage * 100)}%`;
+  const list = (items, fn) => (items || []).map(fn).join("");
+  return `<div class="pack-qa ${qa.status === "ok" ? "" : "warn"}"><strong>${qa.status === "ok" ? "✓ Đã qua kiểm tra tự động" : "⚠ Cần xem lại"}</strong><span>Coverage ${coverage} · sửa ${number(qa.revisions)} lần · ${esc(meta.prompt_id)} · ${esc(meta.model)}</span>${(qa.errors || []).length ? `<ul>${list(qa.errors, e => `<li>${esc(e)}</li>`)}</ul>` : ""}</div>
+<section class="pack-section"><h3>Tóm tắt</h3><p>${esc(pack.summary)}</p></section>
+<section class="pack-section"><h3>Mục tiêu bài học</h3><ul>${list(pack.objectives, x => `<li>${esc(x)}</li>`)}</ul></section>
+${(meta.documents || []).length ? `<section class="pack-section"><h3>Tài liệu đi kèm</h3><ul>${list(meta.documents, d => `<li><a href="${esc(safeUrl(d.url))}" target="_blank" rel="noopener noreferrer">${esc(d.name)}</a></li>`)}</ul></section>` : ""}
+<section class="pack-section"><h3>Khái niệm chính</h3><div class="concept-grid">${list(pack.concepts, c => `<article class="concept"><div class="concept-head"><strong>${esc(c.name)}</strong>${refChips(c.source_refs)}</div><p class="definition">${esc(c.definition)}</p><p>${esc(c.explanation)}</p>${quotes(c.source_refs)}</article>`)}</div></section>
+${(pack.steps || []).length ? `<section class="pack-section"><h3>Các bước thực hành</h3><ol class="steps">${list(pack.steps, x => `<li>${esc(x.text)} ${refChips(x.source_refs)}</li>`)}</ol></section>` : ""}
+<section class="pack-section"><h3>Timeline</h3><ol class="timeline">${list(pack.timeline, t => `<li><span class="ref-chip">${esc(spans[t.chunk_id] || "?")}</span><div><strong>${esc(t.topic)}</strong><p>${esc(t.summary)}</p></div></li>`)}</ol></section>
+<section class="pack-section"><h3>Ghi chú chi tiết</h3>${list(pack.sections, x => `<article class="pack-note"><div class="concept-head"><strong>${esc(x.heading)}</strong>${refChips(x.source_refs)}</div><p>${esc(x.body)}</p>${quotes(x.source_refs)}</article>`)}</section>
+<section class="pack-section"><h3>Cần nhớ</h3><ul class="remember">${list(pack.must_remember, x => `<li>${esc(x.text)} ${refChips(x.source_refs)}</li>`)}</ul></section>
+<section class="pack-section"><h3>Quiz</h3>${list(pack.quiz, (q, i) => `<article class="quiz" data-quiz="${i}"><strong>${i + 1}. ${esc(q.question)}</strong><div class="quiz-options">${list(q.options, (o, j) => `<button type="button" class="quiz-option" data-quiz-q="${i}" data-quiz-opt="${j}">${String.fromCharCode(65 + j)}. ${esc(o)}</button>`)}</div><div class="quiz-result" hidden></div></article>`)}</section>
+${(pack.caveats || []).length ? `<section class="pack-section"><h3>Cần kiểm tra lại</h3><ul>${list(pack.caveats, x => `<li>${esc(x)}</li>`)}</ul></section>` : ""}`;
+}
+function answerQuiz(button) {
+  const q = state.pack?.pack?.quiz?.[Number(button.dataset.quizQ)];
+  if (!q) return;
+  const card = button.closest(".quiz");
+  const chosen = Number(button.dataset.quizOpt);
+  card.querySelectorAll(".quiz-option").forEach((el, j) => { el.disabled = true; el.classList.toggle("correct", j === q.answer_index); el.classList.toggle("wrong", j === chosen && j !== q.answer_index); });
+  const result = card.querySelector(".quiz-result");
+  result.hidden = false;
+  result.innerHTML = `<strong>${chosen === q.answer_index ? "✓ Đúng" : `✗ Chưa đúng — đáp án ${String.fromCharCode(65 + q.answer_index)}`}</strong> ${esc(q.explanation)} ${refChips(q.source_refs)}`;
 }
 
 function openDrawer(kind, id) {
@@ -111,16 +160,16 @@ function openDrawer(kind, id) {
   else item = state.library.notes.find(row => row.id === id && row.type === kind);
   if (!item) return;
   state.selected = { kind, id };
-  const actions = kind === "video" ? `<a class="button button-outline" href="${esc(safeUrl(item.url))}" target="_blank" rel="noopener noreferrer">↗ Mở video Drive</a>${item.caption_id ? `<button class="button button-soft" data-reader-kind="transcript" data-reader-id="${esc(item.caption_id)}">≋ Xem phụ đề</button><button class="button button-accent" data-run="note" data-caption-id="${esc(item.caption_id)}">✦ Tạo ghi chú AI</button>${item.has_ai_note ? `<button class="button button-outline" data-reader-kind="ai_note" data-reader-id="${esc(item.caption_id)}">Đọc ghi chú AI</button>` : ""}${item.has_manual_note ? `<button class="button button-outline" data-reader-kind="study_note" data-reader-id="14-admin">Ghi chú mẫu</button>` : ""}` : ""}`
+  const actions = kind === "video" ? `<a class="button button-outline" href="${esc(safeUrl(item.url))}" target="_blank" rel="noopener noreferrer">↗ Mở video Drive</a>${item.caption_id ? `<button class="button button-soft" data-reader-kind="transcript" data-reader-id="${esc(item.caption_id)}">≋ Xem phụ đề</button>${item.lesson_pack ? `<button class="button button-outline" data-reader-kind="lesson_pack" data-reader-id="${esc(item.caption_id)}">▣ Xem gói bài học</button>` : ""}<button class="button button-accent" data-run="lesson_pack" data-caption-id="${esc(item.caption_id)}">▣ ${item.lesson_pack ? "Tạo lại gói bài học" : "Tạo gói bài học"}</button><button class="button button-soft" data-run="note" data-caption-id="${esc(item.caption_id)}">✦ Tạo ghi chú AI</button>${item.has_ai_note ? `<button class="button button-outline" data-reader-kind="ai_note" data-reader-id="${esc(item.caption_id)}">Đọc ghi chú AI</button>` : ""}${item.has_manual_note ? `<button class="button button-outline" data-reader-kind="study_note" data-reader-id="14-admin">Ghi chú mẫu</button>` : ""}` : ""}`
     : kind === "document" ? `<a class="button button-outline" href="${esc(safeUrl(item.url))}" target="_blank" rel="noopener noreferrer">↗ Mở tài liệu Drive</a>${item.status === "ok" ? `<button class="button button-soft" data-reader-kind="document" data-reader-id="${esc(item.id)}">▤ Xem văn bản</button>` : ""}` : "";
   const meta = kind === "video" ? `<span>${esc(item.course)}</span><span>${item.caption_id ? `${number(item.cue_count)} đoạn phụ đề · ${duration(item.duration_ms)}` : item.source_status === "asr_ready" ? "Chưa có phụ đề · tải được, chờ ASR" : "Không có phụ đề và không tải được video"}</span>`
     : kind === "document" ? `<span>${esc(item.course)}</span><span>${bytes(item.size)} · ${item.status === "ok" ? `${number(item.characters)} ký tự` : item.status === "needs_ocr" ? "Cần OCR để lấy chữ" : "Chưa đọc được nội dung"}</span>`
-      : `<span>${esc(item.course)} · ${kind === "ai_note" ? "Ghi chú AI" : "Ghi chú mẫu"}</span>`;
-  drawerContent.innerHTML = `<div class="drawer-top"><strong>${kind === "video" ? "CHI TIẾT VIDEO" : kind === "document" ? "CHI TIẾT TÀI LIỆU" : "GHI CHÚ HỌC TẬP"}</strong><button type="button" class="icon-button" data-close aria-label="Đóng">×</button></div><div class="drawer-body"><h2>${esc(item.name)}</h2><div class="detail-meta">${meta}<span>${esc(item.path || "")}</span></div><div class="detail-actions">${actions}</div><section class="reader"><div class="reader-head"><span id="reader-title">Nội dung</span><span>${kind === "video" ? "Phụ đề / ghi chú" : kind === "document" ? "Tệp văn bản" : "Markdown"}</span></div><pre id="reader-content">${kind === "video" && !item.caption_id ? (item.source_status === "asr_ready" ? "Video chưa có phụ đề; có thể tạo bằng ASR khi bước này được bật." : "Video không có file phụ đề và chủ sở hữu không cho tải, nên không có nguồn văn bản để tạo ghi chú.") : kind === "document" && item.status !== "ok" ? "Tài liệu này chưa có văn bản để hiển thị." : "Đang tải nội dung…"}</pre></section></div>`;
+      : `<span>${esc(item.course)} · ${kind === "lesson_pack" ? "Gói bài học" : kind === "ai_note" ? "Ghi chú AI" : "Ghi chú mẫu"}</span>`;
+  drawerContent.innerHTML = `<div class="drawer-top"><strong>${kind === "video" ? "CHI TIẾT VIDEO" : kind === "document" ? "CHI TIẾT TÀI LIỆU" : kind === "lesson_pack" ? "GÓI BÀI HỌC" : "GHI CHÚ HỌC TẬP"}</strong><button type="button" class="icon-button" data-close aria-label="Đóng">×</button></div><div class="drawer-body"><h2>${esc(item.name)}</h2><div class="detail-meta">${meta}<span>${esc(item.path || "")}</span></div><div class="detail-actions">${actions}</div><section class="reader"><div class="reader-head"><span id="reader-title">Nội dung</span><span>${kind === "video" ? "Phụ đề / ghi chú" : kind === "document" ? "Tệp văn bản" : "Markdown"}</span></div><pre id="reader-content">${kind === "video" && !item.caption_id ? (item.source_status === "asr_ready" ? "Video chưa có phụ đề; có thể tạo bằng ASR khi bước này được bật." : "Video không có file phụ đề và chủ sở hữu không cho tải, nên không có nguồn văn bản để tạo ghi chú.") : kind === "document" && item.status !== "ok" ? "Tài liệu này chưa có văn bản để hiển thị." : "Đang tải nội dung…"}</pre><div id="pack-content" class="pack" hidden></div></section></div>`;
   backdrop.hidden = false; drawer.classList.add("open"); drawer.setAttribute("aria-hidden", "false");
-  if (kind === "video" && item.caption_id) readFile(item.has_ai_note ? "ai_note" : "transcript", item.caption_id);
+  if (kind === "video" && item.caption_id) readFile(item.lesson_pack ? "lesson_pack" : item.has_ai_note ? "ai_note" : "transcript", item.caption_id);
   else if (kind === "document" && item.status === "ok") readFile("document", item.id);
-  else if (kind === "ai_note" || kind === "study_note") readFile(kind, id);
+  else if (kind === "ai_note" || kind === "study_note" || kind === "lesson_pack") readFile(kind, id);
 }
 function closeDrawer() { drawer.classList.remove("open"); drawer.setAttribute("aria-hidden", "true"); backdrop.hidden = true; state.selected = null; }
 
@@ -135,6 +184,7 @@ async function runJob(action, captionId) {
 document.addEventListener("click", event => {
   const close = event.target.closest("[data-close]"); if (close) { closeDrawer(); return; }
   const nav = event.target.closest("[data-view]"); if (nav) { state.view = nav.dataset.view; location.hash = state.view; state.query = ""; state.course = ""; render(); main.focus(); return; }
+  const quiz = event.target.closest("[data-quiz-opt]"); if (quiz) { answerQuiz(quiz); return; }
   const run = event.target.closest("[data-run]"); if (run) { runJob(run.dataset.run, run.dataset.captionId); return; }
   const reader = event.target.closest("[data-reader-kind]"); if (reader) { readFile(reader.dataset.readerKind, reader.dataset.readerId); return; }
   const open = event.target.closest("[data-open-kind]"); if (open) openDrawer(open.dataset.openKind, open.dataset.id);

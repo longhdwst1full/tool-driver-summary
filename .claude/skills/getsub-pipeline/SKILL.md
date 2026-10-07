@@ -16,13 +16,14 @@ description: Bản đồ pipeline Drive → phụ đề/tài liệu → chunk �
 | Chia đoạn có `chunk_id` cố định | `chunking.py` | `chunk_cues` (5–8 phút), `chunk_document` (theo đoạn văn) |
 | LLM + prompt có version | `llm_client.py` | `LLMClient`, `CodexCLIClient`, `Prompt`, `find_codex` |
 | Ghi chú AI từ phụ đề | `codex_notes.py` | `NOTE_PROMPT`, `generate`, `check_note` |
+| Gói bài học có dẫn nguồn | `lesson_pack.py` | `LESSON_PROMPT` (v2: bối cảnh khóa/chương, số mục theo thời lượng, `steps`, tài liệu cùng thư mục làm nguồn phụ), `verify_pack`, `build_pack`, `resolve_times`, `companion_documents` |
 | Chỉ mục khóa học | `study_pack.py` | `update_study_pack` |
 | Web local 127.0.0.1:8765 | `web_app.py` + `web/` | `library`, `command_for` (whitelist tác vụ) |
 
 ## Dữ liệu (`drive-reports/`, gitignored — dữ liệu riêng của người dùng)
 - `scan.json`: `items[]` có `kind`, `can_download`, `transcript_files`, `source_status`.
 - `transcripts/manifest.json`, `documents/manifest.json`: trạng thái từng file (`ok`, `excluded`, `needs_ocr`…).
-- `ai-notes/`, `study-notes/`: kết quả ghi chú.
+- `ai-notes/`, `study-notes/`: kết quả ghi chú. `lesson-packs/`: gói bài học `.md` + `.json` (pack, qa, meta, chunks).
 - Cần số liệu từ các file này → giao cho agent `report-inspector`, đừng đọc JSON lớn vào context chính.
 
 ## Ràng buộc đã xác minh
@@ -39,4 +40,4 @@ description: Bản đồ pipeline Drive → phụ đề/tài liệu → chunk �
 - Test: `python3 -m unittest discover -s tests` (không cần mạng, không gọi Codex).
 
 ## Lộ trình (hướng C)
-C0 source_status ✓ · C1 chunking ✓ · C2 LLMClient ✓ · C3 gói bài học có `source_refs` + `quote` · C4 `verify_refs`/`coverage`, sửa tối đa 2 lần → `needs_review` · C5 `artifact_key` (hash nguồn + prompt_id + model) · C6 web cho gói bài học · C7 gộp bài + tổng hợp khóa.
+C0 source_status ✓ · C1 chunking ✓ · C2 LLMClient ✓ · C3 gói bài học (`lesson_pack.py --id`) ✓ · C4 `verify_pack` (quote nguyên văn, coverage ≥ 0.8, quiz), sửa tối đa 2 lần → `needs_review` ✓ · C5 `artifact_key` ✓ (chưa có `--all`) · C6 web cho gói bài học ✓ (xem, quiz tương tác, nút tạo) · C7 gộp bài + tổng hợp khóa.

@@ -40,6 +40,23 @@ class WebAppTests(unittest.TestCase):
             self.assertEqual(data["processed"]["sources"], {"caption_file": 1, "asr_ready": 0, "no_source": 0})
             self.assertNotIn("token", json.dumps(data))
             self.assertEqual(file_content("transcript", "caption1")["content"], "# Timeline")
+            self.assertIsNone(data["videos"][0]["lesson_pack"])
+            pack_dir = report / "lesson-packs/Course"
+            pack_dir.mkdir(parents=True)
+            (pack_dir / "Bài 1.json").write_text(json.dumps({
+                "pack": {"summary": "Tóm tắt"}, "qa": {"status": "needs_review", "coverage": 0.5},
+                "meta": {"prompt_id": "lesson_pack@1"},
+                "chunks": [{"chunk_id": "caption1:c001", "start": "00:00", "end": "00:10", "text": "dài"}],
+            }), encoding="utf-8")
+            data = library()
+            self.assertEqual(data["videos"][0]["lesson_pack"], {"status": "needs_review", "coverage": 0.5})
+            self.assertEqual(data["processed"]["lesson_packs"], 1)
+            self.assertIn("lesson_pack", [row["type"] for row in data["notes"]])
+            pack = file_content("lesson_pack", "caption1")
+            self.assertEqual(pack["pack"]["summary"], "Tóm tắt")
+            self.assertNotIn("text", pack["chunks"][0])
+            self.assertIsNone(file_content("lesson_pack", "doc1"))
+            self.assertEqual(command_for("lesson_pack", "caption1")[-3:], ["lesson_pack.py", "--id", "caption1"])
 
     def test_file_reader_blocks_unlisted_paths(self):
         self.assertIsNone(file_content("document", "../../token.json"))
@@ -54,6 +71,8 @@ class WebAppTests(unittest.TestCase):
             command_for("shell")
         with self.assertRaises(ValueError):
             command_for("note", "../../token.json")
+        with self.assertRaises(ValueError):
+            command_for("lesson_pack", "../../token.json")
 
 
 if __name__ == "__main__":
