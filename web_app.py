@@ -279,7 +279,7 @@ def source_catalog(source_id: str | None = None, parent_id: str | None = None,
     """Browse the two filtered scans without loading every video into the web page."""
     if source_id is not None and source_id not in NEW_SOURCE_FOLDERS:
         return None
-    if offset < 0 or offset > 500_000 or len(query) > 100 or kind not in {"", "video", "document", "folder"}:
+    if offset < 0 or offset > 500_000 or len(query) > 100 or kind not in {"", "video", "document", "transcript", "folder"}:
         return None
 
     def read_source(folder_id: str, summary_only: bool = False) -> dict:
@@ -351,7 +351,7 @@ def source_catalog(source_id: str | None = None, parent_id: str | None = None,
                    or needle in item["path"].casefold())
         children = [item for item in matches if not kind or item["kind"] == kind]
         children.sort(key=lambda item: (item["kind"] != "folder", natural_key(item["name"])))
-    elif kind in {"video", "document"}:
+    elif kind in {"video", "document", "transcript"}:
         prefix = "" if parent_id == source_id else folders[parent_id]["path"] + "/"
         children = [item for item in items if item["kind"] == kind
                     and (not prefix or item["path"].startswith(prefix))]
@@ -386,12 +386,15 @@ def source_file_content(source_id: str, kind: str, file_id: str) -> dict | None:
     if source_id not in NEW_SOURCE_FOLDERS or kind not in {"transcript", "document"} or not SAFE_ID.fullmatch(file_id):
         return None
     source_dir = REPORTS / "new-sources" / source_id
-    section, extension = ("transcripts", ".md") if kind == "transcript" else ("documents", ".txt")
+    section = "transcripts" if kind == "transcript" else "documents"
     manifest = read_json(source_dir / section / "manifest.json", {"files": []})
     row = next((entry for entry in manifest.get("files", [])
-                if entry.get("id") == file_id and entry.get("status") == "ok"), None)
+                if entry.get("id") == file_id and entry.get("status") in
+                ({"ok", "untimed_text"} if kind == "transcript" else {"ok"})), None)
     if row is None:
         return None
+    untimed = kind == "transcript" and row["status"] == "untimed_text"
+    extension = ".txt" if kind == "document" or untimed else ".md"
     try:
         path = safe_output_file(source_dir / section, row["output"], extension)
         if not path.is_file():
@@ -402,7 +405,8 @@ def source_file_content(source_id: str, kind: str, file_id: str) -> dict | None:
         return None
     truncated = len(content) > 1_000_000
     return {"title": row.get("name", ""), "kind": kind,
-            "document_type": document_type(row.get("name", ""), row.get("mime_type")) if kind == "document" else None,
+            "document_type": ("text" if untimed else document_type(row.get("name", ""), row.get("mime_type")))
+            if kind == "document" or untimed else None,
             "content": content[:1_000_000], "truncated": truncated}
 
 

@@ -46,6 +46,21 @@ class CourseWebTests(unittest.TestCase):
                 {"id": "1Document123456", "status": "ok", "output": "../../token.txt"}]}), encoding="utf-8")
             self.assertIsNone(source_file_content(source_id, "document", "1Document123456"))
 
+    def test_untimed_source_text_opens_as_document(self):
+        source_id = "1pjNn2Wc_f5dLEfF023m5jvMEyF2s2fWj"
+        file_id = "1UntimedCaption12345"
+        with TemporaryDirectory() as folder, patch("web_app.REPORTS", Path(folder)):
+            transcript_dir = Path(folder) / "new-sources" / source_id / "transcripts"
+            transcript_dir.mkdir(parents=True)
+            (transcript_dir / "Bài đọc.txt").write_text("Nội dung bài đọc", encoding="utf-8")
+            (transcript_dir / "manifest.json").write_text(json.dumps({"files": [
+                {"id": file_id, "name": "Bài đọc.txt", "status": "untimed_text",
+                 "output": "Bài đọc.txt"}]}), encoding="utf-8")
+            result = source_file_content(source_id, "transcript", file_id)
+            self.assertEqual(result["document_type"], "text")
+            self.assertEqual(result["content"], "Nội dung bài đọc")
+            self.assertIsNone(source_file_content(source_id, "transcript", "../../token.json"))
+
     def test_new_source_catalog_is_scoped_and_marks_existing_videos(self):
         source_id = "1GwuGmZuGk04LuvgwLUl9ahdZ1NW-2xqF"
         video_id = "1VideoExisting123456789"
