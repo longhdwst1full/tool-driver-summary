@@ -362,8 +362,15 @@ def source_catalog(source_id: str | None = None, parent_id: str | None = None,
     old_ids = {item["id"] for item in read_json(REPORTS / "scan.json", {"items": []})["items"]}
     source_dir = REPORTS / "new-sources" / source_id
     caption_rows = read_json(source_dir / "transcripts/manifest.json", {"files": []})["files"]
-    captions_by_video = {row["video_id"]: row["id"] for row in caption_rows
-                         if row.get("status") == "ok" and row.get("video_id")}
+    captions_by_video = {}
+    for row in caption_rows:
+        if row.get("status") != "ok" or not row.get("video_id"):
+            continue
+        video_id = row["video_id"]
+        name = row.get("name", "")
+        preferred = re.search(r"(?i)[ _-](?:vi|vn|vietnamese)\.(?:srt|vtt)$", name)
+        if video_id not in captions_by_video or preferred:
+            captions_by_video[video_id] = row["id"]
     transcript_status = {row["id"]: row["status"] for row in caption_rows}
     document_rows = read_json(source_dir / "documents/manifest.json", {"files": []})["files"]
     document_status = {row["id"]: row["status"] for row in document_rows}

@@ -12,6 +12,23 @@ from output_layout import safe_segment
 
 
 class CourseWebTests(unittest.TestCase):
+    def test_new_source_video_prefers_vietnamese_caption(self):
+        source_id = "1pjNn2Wc_f5dLEfF023m5jvMEyF2s2fWj"
+        video_id = "1VideoWithLanguages123"
+        with TemporaryDirectory() as folder, patch("web_app.REPORTS", Path(folder)):
+            source = Path(folder) / "new-sources" / source_id
+            transcripts = source / "transcripts"
+            transcripts.mkdir(parents=True)
+            (source / "scan.json").write_text(json.dumps({
+                "folder": {"id": source_id, "name": "Nguồn học"}, "items": [
+                    {"id": video_id, "name": "Bài 1.mp4", "kind": "video",
+                     "parent_id": source_id, "path": "Nguồn học/Bài 1.mp4"}]}), encoding="utf-8")
+            (transcripts / "manifest.json").write_text(json.dumps({"files": [
+                {"id": "1CaptionVi123456", "name": "Bài 1_vi.srt", "status": "ok", "video_id": video_id},
+                {"id": "1CaptionEn123456", "name": "Bài 1_en.srt", "status": "ok", "video_id": video_id}]}), encoding="utf-8")
+            row = source_catalog(source_id, kind="video")["items"][0]
+            self.assertEqual(row["caption_id"], "1CaptionVi123456")
+
     def test_new_source_reader_only_opens_manifest_outputs(self):
         source_id = "1pjNn2Wc_f5dLEfF023m5jvMEyF2s2fWj"
         with TemporaryDirectory() as folder, patch("web_app.REPORTS", Path(folder)):

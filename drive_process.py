@@ -49,6 +49,7 @@ def parse_drive_caption(raw: str, name: str):
 def caption_video_key(name: str) -> str:
     """Match numbered lessons within one chapter, ignoring a trailing watermark."""
     stem = re.sub(r"\s*\([^)]*\)\s*$", "", Path(name).stem)
+    stem = re.sub(r"(?i)[ _-](?:vi|vn|en|vietnamese|english)$", "", stem)
     stem = re.sub(r"^\s*(?:Bài|Bai)?\s*0*(\d+)\s*[.\-:]?\s*",
                   lambda match: str(int(match.group(1))) + " ", stem, flags=re.I)
     return normalized_label(stem)
@@ -90,10 +91,14 @@ def process_captions(service, scan: dict, output_dir: Path) -> dict:
     paired_video_ids = {video["id"] for video in videos_by_caption.values()}
     for key, captions in captions_by_key.items():
         matches = videos_by_key.get(key, [])
-        if (len(captions) == len(matches) == 1 and key[1]
-                and captions[0]["id"] not in videos_by_caption
-                and matches[0]["id"] not in paired_video_ids):
-            videos_by_caption[captions[0]["id"]] = matches[0]
+        explicitly_linked = {videos_by_caption[caption["id"]]["id"] for caption in captions
+                             if caption["id"] in videos_by_caption}
+        if (len(matches) == 1 and key[1]
+                and (matches[0]["id"] not in paired_video_ids
+                     or explicitly_linked == {matches[0]["id"]})
+                and (not explicitly_linked or explicitly_linked == {matches[0]["id"]})):
+            for caption in captions:
+                videos_by_caption.setdefault(caption["id"], matches[0])
             paired_video_ids.add(matches[0]["id"])
     results = []
     for item in scan["items"]:

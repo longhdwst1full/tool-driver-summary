@@ -29,6 +29,32 @@ class DriveProcessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Mốc kết thúc"):
             parse_drive_caption("1\n00:00:06,000 --> 00:00:06,000\nCâu\n", "Bài học.vtt")
 
+    def test_pairs_english_and_vietnamese_caption_to_one_video(self):
+        root, video = "1RootFolder123456", "1Video1234567890"
+        scan = {"folder": {"id": root, "name": "Khóa học"}, "items": [
+            {"id": video, "parent_id": root, "kind": "video", "name": "001 Course Outline.mp4",
+             "path": "Khóa học/001 Course Outline.mp4"},
+            *({"id": f"1Caption{language}12345", "parent_id": root,
+               "kind": "transcript", "name": f"001 Course Outline_{language}.srt",
+               "path": f"Khóa học/001 Course Outline_{language}.srt", "can_download": True}
+              for language in ("en", "vi")),
+        ]}
+
+        class Service:
+            def files(self):
+                return self
+
+            def get_media(self, **kwargs):
+                return self
+
+            def execute(self):
+                return b"1\n00:00:00,000 --> 00:00:01,000\nCourse content\n"
+
+        with TemporaryDirectory() as folder:
+            result = process_captions(Service(), scan, Path(folder))
+        self.assertEqual(result["ok"], 2)
+        self.assertEqual({row["video_id"] for row in result["files"]}, {video})
+
     def test_pairs_only_unique_lesson_titles_in_same_chapter(self):
         self.assertEqual(caption_video_key("1. Flutter cho MacOS.srt"),
                          caption_video_key("Bài 01 Flutter cho MacOS (website.example).mp4"))
