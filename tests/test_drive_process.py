@@ -143,3 +143,19 @@ class DriveProcessTests(unittest.TestCase):
             self.assertIn("không có mốc", (output / row["output"]).read_text())
             self.assertEqual(process_captions(service, scan, output)["untimed_text"], 1)
             self.assertEqual(service.download_count, 1)
+
+    def test_empty_caption_is_reported_without_download(self):
+        root = "1RootFolder123456"
+        scan = {"folder": {"id": root, "name": "Khóa học"}, "items": [
+            {"id": "1EmptyCaption1234", "parent_id": root, "kind": "transcript",
+             "name": "Bài học_vi.srt", "path": "Khóa học/Bài học_vi.srt",
+             "size": 0, "can_download": True},
+        ]}
+
+        class Service:
+            def files(self):
+                raise AssertionError("File trống không được tải")
+
+        with TemporaryDirectory() as folder:
+            result = process_captions(Service(), scan, Path(folder))
+        self.assertEqual((result["ok"], result["empty"], result["errors"]), (0, 1, 0))

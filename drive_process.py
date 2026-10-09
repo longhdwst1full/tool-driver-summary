@@ -61,6 +61,7 @@ def caption_report(scan: dict, results: list[dict]) -> dict:
         "total": len(results),
         "ok": sum(x["status"] == "ok" for x in results),
         "untimed_text": sum(x["status"] == "untimed_text" for x in results),
+        "empty": sum(x["status"] == "empty" for x in results),
         "errors": sum(x["status"] == "error" for x in results),
         "files": results,
     }
@@ -108,6 +109,14 @@ def process_captions(service, scan: dict, output_dir: Path) -> dict:
         entry = {"id": item["id"], "name": item["name"], "path": item["path"],
                  "modified_time": item.get("modified_time"),
                  "video_id": video["id"] if video else None}
+        if item.get("size") == 0:
+            entry.update({"status": "empty", "bytes": 0})
+            results.append(entry)
+            if len(results) % 20 == 0:
+                temporary = manifest_path.with_suffix(".tmp")
+                temporary.write_text(json.dumps(caption_report(scan, results), ensure_ascii=False) + "\n", encoding="utf-8")
+                temporary.replace(manifest_path)
+            continue
         try:
             if not re.fullmatch(r"[A-Za-z0-9_-]+", item["id"]):
                 raise ValueError("ID file không hợp lệ")
@@ -189,7 +198,8 @@ def main() -> int:
             json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
         print(f"Đã đọc {result['ok']}/{result['total']} file phụ đề; "
-              f"văn bản không mốc: {result['untimed_text']}; lỗi: {result['errors']}")
+              f"văn bản không mốc: {result['untimed_text']}; "
+              f"file trống: {result['empty']}; lỗi: {result['errors']}")
         return 0 if result["errors"] == 0 else 1
     except (OSError, ValueError) as exc:
         print(f"Lỗi xử lý phụ đề: {exc}", file=sys.stderr)
