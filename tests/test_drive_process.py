@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from drive_process import caption_video_key, parse_drive_caption, process_captions
@@ -18,6 +19,15 @@ class DriveProcessTests(unittest.TestCase):
     def test_does_not_treat_untimed_text_as_caption(self):
         with self.assertRaisesRegex(ValueError, "Thiếu mốc thời gian"):
             parse_drive_caption("Prompt đi kèm: ví dụ hình ảnh", "Bài học.txt")
+
+    def test_repairs_zero_length_srt_cue_by_one_millisecond(self):
+        cues = parse_drive_caption(
+            "1\n00:00:06,000 --> 00:00:06,000\nMột câu ngắn\n\n"
+            "2\n00:00:06,000 --> 00:00:08,000\nCâu tiếp theo\n", "Bài học.srt")
+        self.assertEqual([(cue.start_ms, cue.end_ms) for cue in cues],
+                         [(6000, 6001), (6000, 8000)])
+        with self.assertRaisesRegex(ValueError, "Mốc kết thúc"):
+            parse_drive_caption("1\n00:00:06,000 --> 00:00:06,000\nCâu\n", "Bài học.vtt")
 
     def test_pairs_only_unique_lesson_titles_in_same_chapter(self):
         self.assertEqual(caption_video_key("1. Flutter cho MacOS.srt"),
@@ -63,6 +73,12 @@ class DriveProcessTests(unittest.TestCase):
             self.assertEqual(result["files"][0]["video_id"], video)
             self.assertEqual(process_captions(service, scan, Path(folder))["ok"], 1)
             self.assertEqual(service.download_count, 1)
+            (Path(folder) / "manifest.baseline.json").write_text(json.dumps(result), encoding="utf-8")
+            (Path(folder) / "manifest.json").write_text(
+                json.dumps({"folder_id": root, "files": []}), encoding="utf-8")
+            self.assertEqual(process_captions(service, scan, Path(folder))["ok"], 1)
+            self.assertEqual(service.download_count, 1)
+            self.assertFalse((Path(folder) / "manifest.baseline.json").exists())
 
     def test_untimed_txt_is_saved_without_claiming_video_transcript(self):
         root = "1RootFolder123456"

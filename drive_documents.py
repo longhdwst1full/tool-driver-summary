@@ -164,13 +164,15 @@ def process_documents(service, scan: dict, output_dir: Path, max_bytes: int = MA
                     old_path.unlink()
                 entry.update({"status": "excluded", "reason": "Tài liệu quảng cáo Khóa học giá hời"})
                 results.append(entry)
-                save_manifest(manifest_path, scan, results)
+                if len(results) % 50 == 0:
+                    save_manifest(manifest_path, scan, results)
                 continue
             if (not refresh and prior and prior.get("modified_time") == item.get("modified_time")
                     and prior.get("status") in ({"no_access"} if ocr else {"needs_ocr", "no_access"})):
                 entry.update(prior)
                 results.append(entry)
-                save_manifest(manifest_path, scan, results)
+                if len(results) % 50 == 0:
+                    save_manifest(manifest_path, scan, results)
                 continue
             if (not refresh and prior and prior.get("status") == "ok"
                     and prior.get("modified_time") == item.get("modified_time")
@@ -188,7 +190,8 @@ def process_documents(service, scan: dict, output_dir: Path, max_bytes: int = MA
                         entry.update(prior)
                         entry["output"] = output_name
                     results.append(entry)
-                    save_manifest(manifest_path, scan, results)
+                    if len(results) % 50 == 0:
+                        save_manifest(manifest_path, scan, results)
                     continue
             # A run interrupted before its first manifest can still reuse extracted text.
             cached_path = output_path if output_path.is_file() else legacy_path
@@ -207,7 +210,8 @@ def process_documents(service, scan: dict, output_dir: Path, max_bytes: int = MA
                                       "sha256": sha256(content.encode("utf-8")).hexdigest(),
                                       "output": output_name})
                     results.append(entry)
-                    save_manifest(manifest_path, scan, results)
+                    if len(results) % 50 == 0:
+                        save_manifest(manifest_path, scan, results)
                     continue
             if item.get("can_download") is False:
                 entry.update({"status": "no_access"})
@@ -244,7 +248,8 @@ def process_documents(service, scan: dict, output_dir: Path, max_bytes: int = MA
         except Exception as exc:
             entry.update({"status": "error", "error": str(exc)})
         results.append(entry)
-        save_manifest(manifest_path, scan, results)
+        if len(results) % 50 == 0:
+            save_manifest(manifest_path, scan, results)
     return save_manifest(manifest_path, scan, results)
 
 

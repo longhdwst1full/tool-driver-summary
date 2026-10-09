@@ -18,12 +18,30 @@ MAX_CAPTION_BYTES = 2_000_000
 
 
 def parse_drive_caption(raw: str, name: str):
-    """Accept SRT exports that leave a blank line after the cue number."""
+    """Accept two common SRT export quirks without changing cue text."""
     if name.casefold().endswith(".srt"):
         raw = raw.replace("\r\n", "\n").replace("\r", "\n")
         raw = re.sub(
             r"(?m)^(\d+)[ \t]*\n(?:[ \t]*\n)+(?=[ \t]*(?:\d{1,2}:)?\d{2}:\d{2}[,.]\d{3}[ \t]*-->)",
             r"\1\n", raw,
+        )
+        def extend_zero_length(match: re.Match) -> str:
+            start, end = match.group(1), match.group(3)
+            if start.replace(",", ".") != end.replace(",", "."):
+                return end
+            hours, minutes, rest = end.split(":")
+            seconds, millis = re.split(r"[,.]", rest)
+            total = ((int(hours) * 60 + int(minutes)) * 60 + int(seconds)) * 1000 + int(millis) + 1
+            h, remainder = divmod(total, 3_600_000)
+            m, remainder = divmod(remainder, 60_000)
+            s, ms = divmod(remainder, 1000)
+            separator = "," if "," in end else "."
+            return f"{h:02d}:{m:02d}:{s:02d}{separator}{ms:03d}"
+
+        raw = re.sub(
+            r"(?m)^(\d{2}:\d{2}:\d{2}[,.]\d{3})([ \t]*-->[ \t]*)"
+            r"(\d{2}:\d{2}:\d{2}[,.]\d{3})(?=[ \t]*$)",
+            lambda match: match.group(1) + match.group(2) + extend_zero_length(match), raw,
         )
     return parse_captions(raw)
 
@@ -50,8 +68,15 @@ def caption_report(scan: dict, results: list[dict]) -> dict:
 def process_captions(service, scan: dict, output_dir: Path) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "manifest.json"
+    baseline_path = output_dir / "manifest.baseline.json"
     old = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {}
-    previous = {row["id"]: row for row in old.get("files", [])} if old.get("folder_id") == scan["folder"]["id"] else {}
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.is_file() else {}
+    previous = {}
+    for report in (baseline, old):
+        if report.get("folder_id") == scan["folder"]["id"]:
+            previous.update({row["id"]: row for row in report.get("files", [])})
+    if old and not baseline_path.is_file():
+        baseline_path.write_text(json.dumps(old, ensure_ascii=False) + "\n", encoding="utf-8")
     named_paths = output_paths(scan, "transcript")
     videos_by_caption = {caption["id"]: video for video in scan["items"] if video["kind"] == "video"
                          for caption in video.get("transcript_files", [])}
@@ -140,6 +165,7 @@ def process_captions(service, scan: dict, output_dir: Path) -> dict:
     temporary = manifest_path.with_suffix(".tmp")
     temporary.write_text(json.dumps(report, ensure_ascii=False) + "\n", encoding="utf-8")
     temporary.replace(manifest_path)
+    baseline_path.unlink(missing_ok=True)
     return report
 
 
