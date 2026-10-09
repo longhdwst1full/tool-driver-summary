@@ -1,8 +1,9 @@
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from drive_scan import (file_kind, folder_id_from, report_markdown, scan_folder, transcript_key,
+from drive_scan import (curated_exclusion, file_kind, folder_id_from, report_markdown, scan_folder, transcript_key,
                         video_source_status)
 
 
@@ -113,6 +114,30 @@ class DriveScanTests(unittest.TestCase):
         self.assertEqual(report["exclusions"]["folders"], 6)
         self.assertEqual(report["exclusions"]["files"], 3)
         self.assertIn("Đã bỏ qua 6 nhánh", report_markdown(report))
+
+    def test_suno_course_is_removed_from_existing_checkpoint(self):
+        title = "Khóa Học Suno AI – Biến Ý Tưởng Thành Âm Nhạc"
+        other = "Khóa Học Sáng Tạo Âm Nhạc Thương Hiệu Với SUNO AI"
+        self.assertIsNotNone(curated_exclusion(title, "folder", "Khóa học/AI Automation", "Khóa học"))
+        self.assertIsNone(curated_exclusion(other, "folder", "Khóa học/AI Automation", "Khóa học"))
+        with TemporaryDirectory() as folder:
+            checkpoint = Path(folder) / "scan.checkpoint.json"
+            suno_path = f"Khóa học/AI Automation/{title}"
+            checkpoint.write_text(json.dumps({
+                "folder_id": ROOT, "root_name": "Khóa học", "curated_exclusions": True,
+                "queue": [["1SunoFolder12345", suno_path]], "visited": [ROOT],
+                "items": [
+                    {"id": "1SunoFolder12345", "name": title, "kind": "folder",
+                     "parent_id": ROOT, "path": suno_path},
+                    {"id": "1SunoVideo12345", "name": "Bài 1.mp4", "kind": "video",
+                     "parent_id": "1SunoFolder12345", "path": suno_path + "/Bài 1.mp4"},
+                ], "skipped": {"folders": 0, "files": 0, "examples": []},
+            }), encoding="utf-8")
+            service = Service({})
+            report = scan_folder(service, ROOT, curated_exclusions=True, checkpoint_path=checkpoint)
+            self.assertEqual(report["items"], [])
+            self.assertEqual(report["exclusions"]["folders"], 1)
+            self.assertEqual(service.api.queries, [])
 
     def test_parallel_scan_resumes_complete_batch_after_transient_error(self):
         second = "1OtherFolder1234"

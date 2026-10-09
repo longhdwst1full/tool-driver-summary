@@ -92,6 +92,8 @@ def curated_exclusion(name: str, kind: str, parent_path: str, root_path: str) ->
     """Skip requested course branches and promotional files before traversing them."""
     label = normalized_label(name)
     if kind == "folder":
+        if label == "khoa hoc suno ai bien y tuong thanh am nhac":
+            return "Khóa học Suno AI được loại trừ"
         if parent_path == root_path:
             if any(term in label for term in ("dung phim va nhiep anh", "thiet ke do hoa",
                                                "tin hoc van phong")):
@@ -135,6 +137,34 @@ def scan_folder(service, folder_id: str, max_files: int = 500,
         items = state["items"]
         skipped = state["skipped"]
 
+    pruned = False
+    if curated_exclusions and items:
+        excluded_paths = []
+        for row in sorted((item for item in items if item["kind"] == "folder"),
+                          key=lambda item: item["path"].count("/")):
+            path = row["path"]
+            if any(path.startswith(excluded + "/") for excluded in excluded_paths):
+                continue
+            parent_path = path.rsplit("/", 1)[0]
+            reason = curated_exclusion(row["name"], "folder", parent_path, root["name"])
+            if reason:
+                excluded_paths.append(path)
+                skipped["folders"] += 1
+                if len(skipped["examples"]) < 30:
+                    skipped["examples"].append({"path": path, "reason": reason})
+        if excluded_paths:
+            removed = [item for item in items if any(
+                item["path"] == excluded or item["path"].startswith(excluded + "/")
+                for excluded in excluded_paths)]
+            removed_paths = {item["path"] for item in removed}
+            removed_ids = {item["id"] for item in removed if item["kind"] == "folder"}
+            items = [item for item in items if item["path"] not in removed_paths]
+            queue = deque((folder_id, path) for folder_id, path in queue
+                          if not any(path == excluded or path.startswith(excluded + "/")
+                                     for excluded in excluded_paths))
+            visited.difference_update(removed_ids)
+            pruned = True
+
     def save_checkpoint() -> None:
         if checkpoint_path is None:
             return
@@ -146,6 +176,9 @@ def scan_folder(service, folder_id: str, max_files: int = 500,
         temporary.write_text(json.dumps(state, ensure_ascii=False, separators=(",", ":")),
                              encoding="utf-8")
         temporary.replace(checkpoint_path)
+
+    if pruned:
+        save_checkpoint()
 
     worker_state = local()
 

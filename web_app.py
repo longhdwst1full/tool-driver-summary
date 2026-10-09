@@ -369,6 +369,7 @@ def source_catalog(source_id: str | None = None, parent_id: str | None = None,
     document_status = {row["id"]: row["status"] for row in document_rows}
     page = [{key: item.get(key) for key in ("id", "name", "kind", "url", "path", "size")}
             | {"already_indexed": item["id"] in old_ids,
+               "children_count": len(snapshot["children"].get(item["id"], [])) if item["kind"] == "folder" else None,
                "caption_id": captions_by_video.get(item["id"]),
                "transcript_status": transcript_status.get(item["id"]),
                "document_status": document_status.get(item["id"])}
