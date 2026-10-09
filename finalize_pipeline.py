@@ -10,6 +10,7 @@ import sys
 
 
 STEPS = (("Đối chiếu nguồn", "cross_source.py"), ("QA", "qa_report.py"), ("Bài học", "lesson_artifacts.py"),
+         ("Tóm tắt video", "video_summaries.py"),
          ("Khóa học", "course_synthesis.py"), ("Tìm kiếm", "knowledge_search.py", "build"),
          ("NotebookLM", "notebook_export.py"))
 

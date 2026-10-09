@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from drive_scan import (file_kind, folder_id_from, report_markdown, scan_folder, transcript_key,
                         video_source_status)
@@ -12,7 +14,7 @@ class Response:
     def __init__(self, value):
         self.value = value
 
-    def execute(self):
+    def execute(self, **kwargs):
         return self.value
 
 
@@ -79,6 +81,74 @@ class DriveScanTests(unittest.TestCase):
         }}
         with self.assertRaisesRegex(RuntimeError, "giới hạn"):
             scan_folder(Service(pages), ROOT, max_files=1)
+
+    def test_curated_scan_prunes_excluded_branches_before_listing_children(self):
+        def folder(file_id, name):
+            return {"id": file_id, "name": name, "mimeType": "application/vnd.google-apps.folder"}
+
+        pages = {
+            (f"'{ROOT}' in parents and trashed = false", None): {"files": [
+                folder("1Films123456789", "2. Dựng Phim và Nhiếp ảnh"),
+                folder("1Graphics123456", "10. Thiết kế đồ họa"),
+                folder("1Office12345678", "11. Tin học văn phòng"),
+                folder("1Gift1234567890", "15. Quà tặng: tài nguyên"),
+                folder("1Other123456789", "12. Khóa học khác"),
+                folder("1Code1234567890", "1. Công nghệ thông tin"),
+                {"id": "1Zalo1234567890", "name": "NHÓM ZALO HỖ TRỢ KHÁCH HÀNG.png", "mimeType": "image/png"},
+                {"id": "1ZaloOther12345", "name": "NHÓM ZALO - QUÉT MÃ.png", "mimeType": "image/png"},
+                {"id": "1Promo123456789", "name": "Các khóa học thuộc về Khóa học giá hời.txt", "mimeType": "text/plain"},
+            ]},
+            ("'1Other123456789' in parents and trashed = false", None): {"files": [
+                folder("1Music123456789", "Âm nhạc - guitar"),
+                folder("1Health12345678", "Sức khoẻ và làm đẹp"),
+                folder("1Useful12345678", "Lập trình ứng dụng"),
+            ]},
+            ("'1Code1234567890' in parents and trashed = false", None): {"files": [
+                {"id": "1Video123456789", "name": "Bài học.webm", "mimeType": "video/webm"},
+            ]},
+            ("'1Useful12345678' in parents and trashed = false", None): {"files": []},
+        }
+        report = scan_folder(Service(pages), ROOT, curated_exclusions=True)
+        self.assertEqual(report["counts"], {"folder": 3, "video": 1})
+        self.assertEqual(report["exclusions"]["folders"], 6)
+        self.assertEqual(report["exclusions"]["files"], 3)
+        self.assertIn("Đã bỏ qua 6 nhánh", report_markdown(report))
+
+    def test_parallel_scan_resumes_complete_batch_after_transient_error(self):
+        second = "1OtherFolder1234"
+        pages = {
+            (f"'{ROOT}' in parents and trashed = false", None): {"files": [
+                {"id": CHILD, "name": "Chương 1", "mimeType": "application/vnd.google-apps.folder"},
+                {"id": second, "name": "Chương 2", "mimeType": "application/vnd.google-apps.folder"},
+            ]},
+            (f"'{CHILD}' in parents and trashed = false", None): {"files": [
+                {"id": "1VideoFile12345", "name": "Bài 1.webm", "mimeType": "video/webm"},
+            ]},
+            (f"'{second}' in parents and trashed = false", None): {"files": []},
+        }
+        fail_once = [True]
+
+        class FlakyFiles(Files):
+            def list(self, **kwargs):
+                if CHILD in kwargs["q"] and fail_once[0]:
+                    fail_once[0] = False
+                    raise RuntimeError("Drive temporarily unavailable")
+                return super().list(**kwargs)
+
+        class FlakyService(Service):
+            def __init__(self):
+                self.api = FlakyFiles(pages)
+
+        with TemporaryDirectory() as folder:
+            checkpoint = Path(folder) / "scan.checkpoint.json"
+            with self.assertRaisesRegex(RuntimeError, "temporarily"):
+                scan_folder(Service(pages), ROOT, checkpoint_path=checkpoint, workers=2,
+                            service_factory=FlakyService)
+            self.assertTrue(checkpoint.exists())
+            report = scan_folder(Service(pages), ROOT, checkpoint_path=checkpoint, workers=2,
+                                 service_factory=FlakyService)
+            self.assertEqual(report["counts"], {"folder": 2, "video": 1})
+            self.assertEqual(len({row["id"] for row in report["items"]}), report["total"])
 
     def test_file_classification(self):
         self.assertEqual(file_kind({"name": "lecture.mp4", "mimeType": "application/octet-stream"}), "video")

@@ -2,12 +2,26 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from web_app import command_for, file_content, library
+from web_app import Handler, command_for, document_type, file_content, library
 
 
 class WebAppTests(unittest.TestCase):
+    def test_closed_browser_connection_does_not_crash_response_handler(self):
+        handler = object.__new__(Handler)
+        handler.send_response = Mock()
+        handler.send_header = Mock()
+        handler.end_headers = Mock()
+        handler.wfile = Mock()
+        handler.wfile.write.side_effect = BrokenPipeError("browser disconnected")
+        handler.respond(200, b"{}", "application/json")
+        handler.wfile.write.side_effect = ConnectionResetError("browser reset connection")
+        handler.respond(200, b"{}", "application/json")
+        handler.wfile.write.side_effect = ValueError("unexpected server error")
+        with self.assertRaises(ValueError):
+            handler.respond(200, b"{}", "application/json")
+
     def test_library_reads_reports_without_exposing_credentials(self):
         with TemporaryDirectory() as folder, patch("web_app.REPORTS", Path(folder)):
             report = Path(folder)
@@ -61,6 +75,40 @@ class WebAppTests(unittest.TestCase):
     def test_file_reader_blocks_unlisted_paths(self):
         self.assertIsNone(file_content("document", "../../token.json"))
         self.assertIsNone(file_content("study_note", "token"))
+
+    def test_video_summaries_is_listed_and_only_fixed_report_is_readable(self):
+        with TemporaryDirectory() as folder, patch("web_app.REPORTS", Path(folder)):
+            report = Path(folder)
+            (report / "scan.json").write_text(json.dumps({
+                "folder": {"id": "folder1", "name": "Khóa học"},
+                "items": [], "counts": {}, "total": 0,
+            }), encoding="utf-8")
+            (report / "video-summaries.md").write_text("# Tóm tắt video\n\nNội dung thật", encoding="utf-8")
+            notes = library()["notes"]
+            self.assertEqual(notes[0]["type"], "video_summaries")
+            self.assertEqual(file_content("video_summaries", "video-summaries")["content"],
+                             "# Tóm tắt video\n\nNội dung thật")
+            self.assertIsNone(file_content("video_summaries", "token"))
+            self.assertIsNone(file_content("video_summaries", "../../token.json"))
+
+    def test_document_preview_uses_original_file_type(self):
+        self.assertEqual(document_type("guide.pdf", "application/pdf"), "pdf")
+        self.assertEqual(document_type("guide.docx"), "docx")
+        self.assertEqual(document_type("slides.pptx"), "pptx")
+        self.assertEqual(document_type("readme.md", "text/plain"), "markdown")
+        self.assertEqual(document_type("deploy.yml.txt", "text/plain"), "code")
+        with TemporaryDirectory() as folder, patch("web_app.REPORTS", Path(folder)):
+            report = Path(folder)
+            (report / "documents").mkdir()
+            (report / "documents/manifest.json").write_text(json.dumps({"files": [{
+                "id": "pdf1", "name": "guide.pdf", "mime_type": "application/pdf",
+                "status": "ok", "output": "guide.txt",
+            }]}), encoding="utf-8")
+            (report / "documents/guide.txt").write_text("[Trang 1]\nNội dung", encoding="utf-8")
+            result = file_content("document", "pdf1")
+            self.assertEqual(result["document_type"], "pdf")
+            self.assertEqual(result["content"], "[Trang 1]\nNội dung")
+            self.assertIsNone(file_content("document", "../../token.json"))
 
     def test_jobs_are_whitelisted(self):
         with TemporaryDirectory() as folder, patch("web_app.REPORTS", Path(folder)):

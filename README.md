@@ -12,7 +12,7 @@ Sau khi đã quét Drive, mở giao diện trên máy:
 python3 web_app.py
 ```
 
-Truy cập **http://127.0.0.1:8765**. Video được duyệt theo khóa học rồi theo chương; chọn bài để mở video gốc, phụ đề và ghi chú. Các file Markdown được xem dưới dạng trang đọc có tiêu đề, danh sách và bảng. Giao diện còn có tài liệu, ghi chú, lịch sử tác vụ và các nút quét Drive, đọc phụ đề, đọc tài liệu, tạo ghi chú AI hoặc gói bài học cho video có phụ đề riêng. Dùng `python3 web_app.py --port 8766` nếu cổng mặc định đang bận.
+Truy cập **http://127.0.0.1:8765**. Video được duyệt theo khóa học rồi theo chương; chọn bài để mở video gốc, phụ đề và ghi chú. Bản chép lời thu từ giao diện Drive và bài học AI đã kiểm tra nguồn cũng xuất hiện ngay trong chi tiết video và mục Ghi chú. Các file Markdown được xem dưới dạng trang đọc có tiêu đề, danh sách và bảng. Giao diện còn có tài liệu, lịch sử tác vụ và các nút quét Drive, đọc phụ đề, đọc tài liệu, tạo ghi chú AI hoặc gói bài học cho video có phụ đề riêng. Dùng `python3 web_app.py --port 8766` nếu cổng mặc định đang bận.
 
 Web chỉ lắng nghe trên `127.0.0.1`. API chỉ đọc nội dung thuộc manifest; các nút xử lý chỉ chạy tác vụ đã định sẵn. `credentials.json` và `token.json` không được gửi cho trình duyệt. Đóng web bằng `Ctrl+C` trong terminal.
 
@@ -44,6 +44,12 @@ PYTHONPATH=.deps python3 drive_scan.py 'LINK_THU_MUC_DRIVE'
 
 Kết quả nằm trong `drive-reports/scan.md` và `drive-reports/scan.json`. Cả credentials, token và báo cáo thật đều được `.gitignore` bỏ qua. Dùng `--max-files 2000` nếu thư mục có hơn 500 mục; chương trình sẽ báo lỗi rõ ràng khi chạm giới hạn thay vì xuất báo cáo thiếu.
 
+Hai nguồn “Khóa Học Giá Hời 2026” được quét riêng bằng `--curated-exclusions` và `--output-dir drive-reports/new-sources/<ID>`. Dùng `--workers 3` để quét song song với ba kết nối Drive riêng (tối đa 4). Bộ lọc không duyệt sâu các nhánh Dựng phim và Nhiếp ảnh, Thiết kế đồ họa, Tin học văn phòng, “15. Quà tặng: tài nguyên”; trong “Khóa học khác” bỏ Âm nhạc, Guitar, Làm nhạc, Piano, Sức khỏe/Làm đẹp. File nhóm Zalo và file quảng bá khóa học giá hời cũng bị loại. `scan.checkpoint.json` lưu điểm tiếp tục sau mỗi 20 thư mục; chạy lại cùng lệnh nếu Drive trả lỗi tạm thời. Mục **Nguồn Drive mới** trên web cho phép duyệt cây thư mục khi quét và sau khi hoàn tất, tìm kiếm và lọc thư mục/video/tài liệu trong toàn bộ nhánh đang mở, đồng thời đánh dấu video đã có trong thư viện Vibe Coding cũ. Chọn video để xem trong trình phát nhúng; trình duyệt cần đăng nhập tài khoản có quyền xem file Drive đó.
+
+Nếu đang chạy bản thử trong nền, xem tiến độ bằng `systemctl --user status tool-getsub-scan-a-final tool-getsub-scan-b tool-getsub-web` hoặc `journalctl --user -u tool-getsub-scan-a-final -f`. Nguồn thứ nhất có hơn 100.000 mục nên lượt chạy nền dùng `--max-files 500000`. Máy dùng HTTP proxy cần cài `PySocks` từ `requirements.txt` để Google API đi qua proxy. Khi quét xong, mỗi nguồn có `scan.json` và `scan.md` trong thư mục kết quả tương ứng.
+
+Phụ đề và tài liệu trích xuất của từng nguồn nằm trong `drive-reports/new-sources/<ID>/transcripts/` và `documents/`. Web cho mở các file có trạng thái `ok` ngay trong trang đọc. File phụ đề chưa ghép được với video vẫn được liệt kê riêng, không tự gán theo tên gần giống. Tác vụ nền hiện tại: `tool-getsub-source-b-documents` đọc tài liệu nguồn thứ hai; `tool-getsub-source-a-process` đợi nguồn thứ nhất quét xong rồi đọc phụ đề và tài liệu. Xem tiến độ bằng `systemctl --user status <tên-tác-vụ>` hoặc mở mục **Nguồn Drive mới** trên web.
+
 Nếu trong thư mục có file phụ đề `.srt`/`.vtt` riêng, chạy tiếp:
 
 ```bash
@@ -51,6 +57,23 @@ PYTHONPATH=.deps python3 drive_process.py
 ```
 
 Kết quả theo từng file nằm trong `drive-reports/transcripts/<tên khóa học>/<tên chương>/<tên video>.md`; `manifest.json` ghi số đoạn, thời lượng và lỗi nếu có. Phần đầu mỗi file Markdown chỉ là 5 đoạn phụ đề đầu để kiểm tra, chưa phải bản tóm tắt toàn bài bằng AI.
+
+## Bản thử đọc transcript giao diện và phân tích theo đoạn
+
+Nếu chủ sở hữu cho phép trích xuất bản chép lời đang hiển thị trong Drive, xem [hướng dẫn thử một video](browser-demo/README.md). Có thể thu bằng tab Chrome đang mở hoặc chạy `browser-demo/background_capture.py` trong một phiên Chrome headless riêng để tiếp tục dùng máy. Bộ nhập kiểm tra JSON và chuyển thành SRT trong `drive-reports/ui-transcripts/`. Hãy kiểm tra đầu và cuối bản thu với video trước khi dùng cho AI; công cụ không tự khẳng định đã lấy đủ mọi câu chỉ từ việc chạm đáy panel.
+
+Với phụ đề riêng đã xử lý, hoặc SRT giao diện đã kiểm tra, thử cách phân tích từng đoạn và tạo ghi chú có trích dẫn:
+
+```bash
+python3 progressive_demo.py --id ID_FILE_PHU_DE_TU_MANIFEST
+python3 progressive_demo.py --ui-video-id ID_VIDEO_TRONG_SCAN
+```
+
+Kết quả nằm trong `drive-reports/progressive-demo/` theo khóa học/chương/bài. JSON lưu các điểm kiến thức và câu trích nguồn; Markdown tổng hợp sau khi toàn bộ đoạn đã được đọc.
+
+Để xử lý tiếp các video chưa có file phụ đề trong bản quét hiện tại, chạy `python3 batch_ui_lessons.py --workers 2 --ai`. Lệnh dùng Chrome chạy ngầm, tự bỏ qua bản thu và ghi chú đã hợp lệ, rồi ghi tiến độ vào `drive-reports/ui-transcripts/batch-manifest.json`. Có thể thử một khóa học trước bằng `--course 'Tên khóa học' --limit 1`; mở web để xem tiến độ và bài học đã hoàn tất. Bản thu không đủ mốc đầu/cuối và ghi chú thiếu dẫn nguồn sẽ được ghi lỗi để chạy lại, không được coi là bài học hoàn tất.
+
+Nếu Codex CLI báo hết hạn mức, bản chép lời đã thu vẫn hiện trong web theo khóa học/chương với trạng thái `ai_waiting`. Lệnh dừng gọi AI cho các bài còn lại trong lượt đó; chạy lại `python3 batch_ui_lessons.py --workers 2 --ai` khi hạn mức phục hồi. Dùng `python3 batch_ui_lessons.py --missing-only --workers 2` để thử thu lại các video chưa có bản chép lời mà không gọi AI, hoặc `python3 batch_ui_lessons.py --reconcile-only` để chỉ cập nhật trạng thái từ kết quả đã lưu.
 
 Đọc văn bản từ các tài liệu PDF, DOCX, PPTX và TXT trong báo cáo quét:
 
