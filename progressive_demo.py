@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from hashlib import sha256
 import json
@@ -132,8 +133,28 @@ def validate_final(note: dict, points: list[dict]) -> None:
         raise ValueError("Ghi chú cuối chưa dẫn nguồn từ mọi đoạn phụ đề")
 
 
+def extract_chunk_points(client: LLMClient, title: str, chunk, prior: str,
+                         label: str) -> list[dict]:
+    prompt = EXTRACT_PROMPT.render(title=title, start=chunk.start or "",
+                                   end=chunk.end or "", prior=prior, source=chunk.text)
+    print(f"Đang đọc đoạn {label} ({chunk.start}–{chunk.end})", flush=True)
+    accepted = []
+    for attempt in range(3):
+        result = client.generate(prompt, POINT_SCHEMA)
+        accepted = exact_points(result["points"], chunk.text)
+        if accepted:
+            break
+        print(f"  Đoạn {label}: trích dẫn chưa khớp; thử lại {attempt + 1}/3", flush=True)
+        prompt += "\nLần trước trích dẫn không khớp. Hãy chọn quote ngắn xuất hiện NGUYÊN VĂN trong <doan_moi>."
+    validate_points(accepted, chunk.text)
+    return accepted
+
+
 def build_progressive(client: LLMClient, title: str, caption_id: str,
-                      cues: list[tuple[str, str, str]]) -> dict:
+                      cues: list[tuple[str, str, str]], workers: int = 1) -> dict:
+    """workers > 1 reads chunks concurrently without <da_biet>; the final step merges overlaps."""
+    if workers < 1:
+        raise ValueError("Số luồng đọc đoạn phải lớn hơn 0")
     chunks = chunk_cues(caption_id, cues)
     # A short closing remark can form its own time window. Keep it with the
     # preceding lecture segment so the model need not invent a learning point.
@@ -143,23 +164,29 @@ def build_progressive(client: LLMClient, title: str, caption_id: str,
         chunks[-1] = replace(chunks[-1], text=chunks[-1].text + "\n" + tail.text,
                              end=tail.end)
     points: list[dict] = []
-    for index, chunk in enumerate(chunks, 1):
-        prior = "\n".join(f"- {item['text']}" for item in points[-20:]) or "(chưa có)"
-        prompt = EXTRACT_PROMPT.render(title=title, start=chunk.start or "",
-                                       end=chunk.end or "", prior=prior, source=chunk.text)
-        print(f"Đang đọc đoạn {index}/{len(chunks)} ({chunk.start}–{chunk.end})", flush=True)
-        accepted = []
-        for attempt in range(3):
-            result = client.generate(prompt, POINT_SCHEMA)
-            accepted = exact_points(result["points"], chunk.text)
-            if accepted:
-                break
-            print(f"  Trích dẫn chưa khớp; thử lại {attempt + 1}/3", flush=True)
-            prompt += "\nLần trước trích dẫn không khớp. Hãy chọn quote ngắn xuất hiện NGUYÊN VĂN trong <doan_moi>."
-        validate_points(accepted, chunk.text)
+
+    def add_points(chunk, accepted: list[dict]) -> None:
         for number, point in enumerate(accepted, 1):
             points.append({**point, "point_id": f"{chunk.chunk_id}:p{number:02d}",
                            "chunk_id": chunk.chunk_id, "start": chunk.start, "end": chunk.end})
+
+    total = len(chunks)
+    if workers == 1 or total == 1:
+        for index, chunk in enumerate(chunks, 1):
+            prior = "\n".join(f"- {item['text']}" for item in points[-20:]) or "(chưa có)"
+            add_points(chunk, extract_chunk_points(client, title, chunk, prior, f"{index}/{total}"))
+    else:
+        with ThreadPoolExecutor(max_workers=min(workers, total)) as pool:
+            futures = [pool.submit(extract_chunk_points, client, title, chunk, "(chưa có)",
+                                   f"{index}/{total}") for index, chunk in enumerate(chunks, 1)]
+            try:
+                # Collect in chunk order so point ids and sections stay chronological.
+                for chunk, future in zip(chunks, futures):
+                    add_points(chunk, future.result())
+            except BaseException:
+                for future in futures:
+                    future.cancel()
+                raise
     print("Đang tổng hợp ghi chú cuối", flush=True)
     final_prompt = FINAL_PROMPT.render(title=title, points=json.dumps(points, ensure_ascii=False))
     for attempt in range(3):
@@ -176,6 +203,7 @@ def build_progressive(client: LLMClient, title: str, caption_id: str,
     return {"title": title, "caption_id": caption_id, "points": points, "note": note,
             "source_sha256": sha256("\n".join(str(cue) for cue in cues).encode()).hexdigest(),
             "prompts": [EXTRACT_PROMPT.prompt_id, FINAL_PROMPT.prompt_id],
+            "extract_mode": "parallel" if workers > 1 and len(chunks) > 1 else "sequential",
             "qa": {"status": "ok", "covered_chunks": len(chunks), "total_chunks": len(chunks)}}
 
 
@@ -213,6 +241,8 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=Path("drive-reports/progressive-demo"))
     parser.add_argument("--codex", type=Path)
     parser.add_argument("--refresh", action="store_true")
+    parser.add_argument("--extract-workers", type=int, default=4, choices=range(1, 7),
+                        help="Số đoạn gửi Codex song song (1 = tuần tự, có ngữ cảnh ý đã biết)")
     args = parser.parse_args()
     try:
         scan = json.loads(args.scan.read_text(encoding="utf-8"))
@@ -259,7 +289,8 @@ def main() -> int:
             print(f"Đã có: {output}")
             return 0
         result = build_progressive(CodexCLIClient(find_codex(args.codex)),
-                                   video_title(video["name"]), source_id, cues)
+                                   video_title(video["name"]), source_id, cues,
+                                   workers=args.extract_workers)
         result["source_kind"] = source_kind
         output.parent.mkdir(parents=True, exist_ok=True)
         caption_link = Path(os.path.relpath(source, output.parent)).as_posix()

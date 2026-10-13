@@ -55,6 +55,42 @@ class DriveProcessTests(unittest.TestCase):
         self.assertEqual(result["ok"], 2)
         self.assertEqual({row["video_id"] for row in result["files"]}, {video})
 
+    def test_parallel_download_keeps_scan_order_and_thread_clients(self):
+        import threading
+        root = "1RootFolder123456"
+        scan = {"folder": {"id": root, "name": "Khóa học"}, "items": [
+            {"id": f"1Caption{index:02d}12345", "parent_id": root, "kind": "transcript",
+             "name": f"Bài {index:02d}.srt", "path": f"Khóa học/Bài {index:02d}.srt",
+             "can_download": True} for index in range(25)]}
+        owners = set()
+
+        class Service:
+            def __init__(self):
+                self.owner = threading.get_ident()
+                owners.add(self.owner)
+
+            def files(self):
+                return self
+
+            def get_media(self, **kwargs):
+                return self
+
+            def execute(self):
+                assert self.owner == threading.get_ident()
+                return "1\n00:00:00,000 --> 00:00:01,000\nNội dung\n".encode()
+
+        with TemporaryDirectory() as folder:
+            with self.assertRaisesRegex(ValueError, "kết nối Drive riêng"):
+                process_captions(Service(), scan, Path(folder), workers=2)
+            owners.clear()
+            result = process_captions(None, scan, Path(folder), workers=3, service_factory=Service)
+            saved = json.loads((Path(folder) / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(result["ok"], 25)
+        self.assertLessEqual(len(owners), 3)
+        self.assertEqual([row["id"] for row in result["files"]],
+                         [item["id"] for item in scan["items"]])
+        self.assertEqual(saved["ok"], 25)
+
     def test_pairs_only_unique_lesson_titles_in_same_chapter(self):
         self.assertEqual(caption_video_key("1. Flutter cho MacOS.srt"),
                          caption_video_key("Bài 01 Flutter cho MacOS (website.example).mp4"))

@@ -86,6 +86,8 @@ def connect() -> sqlite3.Connection:
     DB.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(DB)
     db.execute("PRAGMA journal_mode=WAL")
+    # WAL + NORMAL keeps the database consistent after a crash; only skips fsync per commit.
+    db.execute("PRAGMA synchronous=NORMAL")
     db.execute("""CREATE TABLE IF NOT EXISTS work (
         source_id TEXT NOT NULL, video_id TEXT NOT NULL, category TEXT NOT NULL,
         priority INTEGER NOT NULL, capture_status TEXT NOT NULL DEFAULT 'queued',
@@ -154,6 +156,9 @@ def capture_all(db: sqlite3.Connection, videos: list[tuple[str, dict, str, int]]
     submitted = 0
     pending = {}
     video_iter = iter(videos)
+    # One read instead of a SELECT per video; each video is visited once per run.
+    known = {(row[0], row[1]): (row[2], row[3]) for row in db.execute(
+        "SELECT source_id, video_id, capture_status, attempts FROM work")}
     local = threading.local()
     sessions = []
     sessions_lock = threading.Lock()
@@ -202,9 +207,7 @@ def capture_all(db: sqlite3.Connection, videos: list[tuple[str, dict, str, int]]
         for source, video, _, _ in video_iter:
             if limit is not None and submitted >= limit:
                 return False
-            status, attempts = db.execute(
-                "SELECT capture_status, attempts FROM work WHERE source_id=? AND video_id=?",
-                (source, video["id"])).fetchone()
+            status, attempts = known[(source, video["id"])]
             if "suno" in video.get("path", "").casefold():
                 if status != "excluded":
                     mark(db, source, video["id"], capture="excluded", summary="excluded",
@@ -259,7 +262,7 @@ def capture_all(db: sqlite3.Connection, videos: list[tuple[str, dict, str, int]]
 
 
 def summarize_all(db: sqlite3.Connection, videos: list[tuple[str, dict, str, int]],
-                  limit: int | None) -> None:
+                  limit: int | None, extract_workers: int = 1) -> None:
     client = None
     completed = 0
     for source, video, _, _ in videos:
@@ -286,7 +289,8 @@ def summarize_all(db: sqlite3.Connection, videos: list[tuple[str, dict, str, int
             client = CodexCLIClient(find_codex(None))
         mark(db, source, video["id"], summary="running")
         try:
-            result = build_progressive(client, video_title(video["name"]), video["id"], cues)
+            result = build_progressive(client, video_title(video["name"]), video["id"], cues,
+                                       workers=extract_workers)
             result["source_kind"] = "drive_ui_transcript"
             output = source_note_path(source_dir, mini_scan, video, ".md")
             data_output = source_note_path(source_dir, mini_scan, video, ".json")
@@ -326,8 +330,10 @@ def main() -> int:
     parser.add_argument("--phase", choices=("capture", "summary", "all", "status"), default="all")
     parser.add_argument("--limit", type=int, help="Giới hạn số video mới trong mỗi pha để thử")
     parser.add_argument("--retry-unavailable", action="store_true")
-    parser.add_argument("--workers", type=int, default=2,
-                        help="Số Chrome thu lời đồng thời (mặc định: 2, tối đa: 6)")
+    parser.add_argument("--workers", type=int, default=3,
+                        help="Số Chrome thu lời đồng thời (mặc định: 3, tối đa: 6)")
+    parser.add_argument("--extract-workers", type=int, default=4, choices=range(1, 7),
+                        help="Số đoạn của một video gửi Codex song song (1 = tuần tự)")
     args = parser.parse_args()
     if args.limit is not None and args.limit < 1:
         parser.error("--limit phải dương")
@@ -347,7 +353,7 @@ def main() -> int:
     if args.phase in {"capture", "all"}:
         capture_all(db, videos, args.limit, args.retry_unavailable, args.workers)
     if args.phase in {"summary", "all"}:
-        summarize_all(db, videos, args.limit)
+        summarize_all(db, videos, args.limit, args.extract_workers)
     print(json.dumps(status(db), ensure_ascii=False), flush=True)
     db.close()
     return 0

@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 from threading import Event, Lock
+import time
 
 from getsub_demo import parse_captions
 from import_ui_transcript import validate_export
@@ -20,6 +21,7 @@ from web_app import NEW_SOURCE_FOLDERS, progressive_note_summary, source_video_s
 
 ROOT = Path(__file__).resolve().parent
 REPORTS = ROOT / "drive-reports"
+MANIFEST_SAVE_SECONDS = 2.0
 
 
 def quota_limited(output: str) -> bool:
@@ -55,7 +57,8 @@ def save_manifest(path: Path, scan: dict, entries: dict[str, dict]) -> None:
                "counts": counts, "videos": entries}
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n",
+                         encoding="utf-8")
     temporary.replace(path)
 
 
@@ -96,6 +99,7 @@ def main() -> int:
     entries = dict(old.get("videos", {})) if old.get("folder_id") == scan["folder"]["id"] else {}
     lock = Lock()
     quota_event = Event()
+    last_save = 0.0
     for item in videos:
         entries.setdefault(item["id"], {"status": "queued", "rows": 0})
 
@@ -104,13 +108,18 @@ def main() -> int:
             else bool(progressive_note_summary(scan, video, cues))
 
     def mark(video_id: str, status: str, **extra: object) -> None:
+        nonlocal last_save
         with lock:
             row = {**entries.get(video_id, {}), "status": status, **extra,
                    "updated_at": datetime.now(timezone.utc).isoformat()}
             if status in {"done", "captured", "running"}:
                 row.pop("error", None)
             entries[video_id] = row
-            save_manifest(args.manifest, scan, entries)
+            # Rewriting the whole manifest per status is O(N²) on large scans;
+            # files on disk stay authoritative, so a short lag is safe to reconcile.
+            if time.monotonic() - last_save >= MANIFEST_SAVE_SECONDS:
+                save_manifest(args.manifest, scan, entries)
+                last_save = time.monotonic()
         print(f"{video_id}: {status}", flush=True)
 
     for video in videos:
@@ -189,6 +198,8 @@ def main() -> int:
                 future.result()
             except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
                 mark(futures[future], "failed", error=str(exc)[:300])
+    with lock:
+        save_manifest(args.manifest, scan, entries)
     counts = read_counts(args.manifest)
     print(json.dumps({"selected": len(videos), "counts": counts}, ensure_ascii=False), flush=True)
     return 0 if not counts["failed"] else 2

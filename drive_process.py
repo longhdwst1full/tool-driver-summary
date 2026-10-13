@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import re
 import sys
+from threading import local
 
 from drive_scan import google_service, normalized_label
 from getsub_demo import markdown, parse_captions
@@ -67,7 +69,10 @@ def caption_report(scan: dict, results: list[dict]) -> dict:
     }
 
 
-def process_captions(service, scan: dict, output_dir: Path) -> dict:
+def process_captions(service, scan: dict, output_dir: Path, workers: int = 1,
+                     service_factory=None) -> dict:
+    if workers < 1 or (workers > 1 and service_factory is None):
+        raise ValueError("Tải song song cần --workers >= 2 và kết nối Drive riêng cho mỗi luồng")
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "manifest.json"
     baseline_path = output_dir / "manifest.baseline.json"
@@ -101,22 +106,30 @@ def process_captions(service, scan: dict, output_dir: Path) -> dict:
             for caption in captions:
                 videos_by_caption.setdefault(caption["id"], matches[0])
             paired_video_ids.add(matches[0]["id"])
-    results = []
-    for item in scan["items"]:
-        if item["kind"] != "transcript":
-            continue
+    worker_state = local()
+
+    def api_service():
+        # httplib2 connections are not thread-safe: one Drive client per worker thread.
+        if service_factory is None:
+            return service
+        current = getattr(worker_state, "service", None)
+        if current is None:
+            current = worker_state.service = service_factory()
+        return current
+
+    def save_progress(results: list[dict]) -> None:
+        temporary = manifest_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(caption_report(scan, results), ensure_ascii=False) + "\n", encoding="utf-8")
+        temporary.replace(manifest_path)
+
+    def process_one(item: dict) -> dict:
         video = videos_by_caption.get(item["id"])
         entry = {"id": item["id"], "name": item["name"], "path": item["path"],
                  "modified_time": item.get("modified_time"),
                  "video_id": video["id"] if video else None}
         if item.get("size") == 0:
             entry.update({"status": "empty", "bytes": 0})
-            results.append(entry)
-            if len(results) % 20 == 0:
-                temporary = manifest_path.with_suffix(".tmp")
-                temporary.write_text(json.dumps(caption_report(scan, results), ensure_ascii=False) + "\n", encoding="utf-8")
-                temporary.replace(manifest_path)
-            continue
+            return entry
         try:
             if not re.fullmatch(r"[A-Za-z0-9_-]+", item["id"]):
                 raise ValueError("ID file không hợp lệ")
@@ -137,7 +150,7 @@ def process_captions(service, scan: dict, output_dir: Path) -> dict:
                   and safe_output_file(output_dir, prior["output"], ".txt").is_file()):
                 entry.update({key: prior[key] for key in ("status", "bytes", "characters", "output")})
             else:
-                raw = service.files().get_media(fileId=item["id"], supportsAllDrives=True).execute()
+                raw = api_service().files().get_media(fileId=item["id"], supportsAllDrives=True).execute()
                 if len(raw) > MAX_CAPTION_BYTES:
                     raise ValueError("File vượt giới hạn 2 MB cho bản thử")
                 decoded = raw.decode("utf-8-sig")
@@ -170,15 +183,23 @@ def process_captions(service, scan: dict, output_dir: Path) -> dict:
             entry.update({"status": "error", "error": str(exc)})
         except Exception as exc:
             entry.update({"status": "error", "error": f"Drive: {exc}"})
-        results.append(entry)
-        if len(results) % 20 == 0:
-            temporary = manifest_path.with_suffix(".tmp")
-            temporary.write_text(json.dumps(caption_report(scan, results), ensure_ascii=False) + "\n", encoding="utf-8")
-            temporary.replace(manifest_path)
+        return entry
+
+    captions = [item for item in scan["items"] if item["kind"] == "transcript"]
+    results = []
+    executor = ThreadPoolExecutor(max_workers=workers) if workers > 1 else None
+    try:
+        # map() keeps scan order so the manifest stays stable between runs.
+        entries = executor.map(process_one, captions) if executor else map(process_one, captions)
+        for entry in entries:
+            results.append(entry)
+            if len(results) % 20 == 0:
+                save_progress(results)
+    finally:
+        if executor:
+            executor.shutdown(wait=True, cancel_futures=True)
     report = caption_report(scan, results)
-    temporary = manifest_path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(report, ensure_ascii=False) + "\n", encoding="utf-8")
-    temporary.replace(manifest_path)
+    save_progress(results)
     baseline_path.unlink(missing_ok=True)
     return report
 
@@ -189,11 +210,17 @@ def main() -> int:
     parser.add_argument("--credentials", type=Path, default=Path("credentials.json"))
     parser.add_argument("--token", type=Path, default=Path("token.json"))
     parser.add_argument("--output-dir", type=Path, default=Path("drive-reports/transcripts"))
+    parser.add_argument("--workers", type=int, default=4,
+                        help="Số kết nối Drive tải song song (mặc định 4, tối đa 8)")
     args = parser.parse_args()
     try:
+        if args.workers < 1 or args.workers > 8:
+            raise ValueError("--workers phải trong khoảng 1-8")
         scan = json.loads(args.scan.read_text(encoding="utf-8"))
         service = google_service(args.credentials, args.token)
-        result = process_captions(service, scan, args.output_dir)
+        result = process_captions(service, scan, args.output_dir, workers=args.workers,
+                                  service_factory=(lambda: google_service(args.credentials, args.token))
+                                  if args.workers > 1 else None)
         (args.output_dir / "manifest.json").write_text(
             json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )

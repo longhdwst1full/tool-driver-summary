@@ -11,6 +11,7 @@ import argparse
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from collections import deque
 import fcntl
+from functools import partial
 import json
 import os
 from pathlib import Path
@@ -61,7 +62,7 @@ def claim(db: sqlite3.Connection, source: str, video_id: str) -> bool:
 
 
 def summarize_one(db: sqlite3.Connection, source: str, video: dict,
-                  client: CodexCLIClient) -> str:
+                  client: CodexCLIClient, extract_workers: int = 1) -> str:
     video_id = video["id"]
     source_dir = REPORTS / "new-sources" / source
     mini_scan = {"folder": source_videos_folder(source), "items": [video]}
@@ -77,7 +78,8 @@ def summarize_one(db: sqlite3.Connection, source: str, video: dict,
     srt = safe_output_file(source_dir / "ui-transcripts", video_id + ".srt", ".srt")
     parsed = parse_captions(srt.read_text(encoding="utf-8"))
     cues = [(format_time(cue.start_ms), format_time(cue.end_ms), cue.text) for cue in parsed]
-    result = build_progressive(client, video_title(video["name"]), video_id, cues)
+    result = build_progressive(client, video_title(video["name"]), video_id, cues,
+                               workers=extract_workers)
     result["source_kind"] = "drive_ui_transcript"
     output = source_note_path(source_dir, mini_scan, video, ".md")
     data_output = source_note_path(source_dir, mini_scan, video, ".json")
@@ -98,11 +100,11 @@ def summarize_one(db: sqlite3.Connection, source: str, video: dict,
     return "created"
 
 
-def summary_task(source: str, video: dict) -> str:
+def summary_task(source: str, video: dict, extract_workers: int = 1) -> str:
     """Each thread owns its connection and Codex client."""
     db = connect()
     try:
-        return summarize_one(db, source, video, CodexCLIClient(find_codex(None)))
+        return summarize_one(db, source, video, CodexCLIClient(find_codex(None)), extract_workers)
     finally:
         db.close()
 
@@ -158,8 +160,10 @@ def main() -> int:
     parser.add_argument("--once", action="store_true", help="Xử lý mọi bản đã sẵn sàng rồi thoát")
     parser.add_argument("--max-new", type=int, help="Giới hạn lượt tạo AI để chạy thử")
     parser.add_argument("--poll-seconds", type=int, default=20)
-    parser.add_argument("--workers", type=int, choices=(1, 2), default=1,
-                        help="Số video tóm tắt song song (mặc định 1, tối đa 2)")
+    parser.add_argument("--workers", type=int, choices=range(1, 5), default=2,
+                        help="Số video tóm tắt song song (mặc định 2, tối đa 4)")
+    parser.add_argument("--extract-workers", type=int, default=4, choices=range(1, 7),
+                        help="Số đoạn của một video gửi Codex song song (1 = tuần tự)")
     args = parser.parse_args()
     if args.max_new is not None and args.max_new < 1:
         parser.error("--max-new phải dương")
@@ -181,7 +185,8 @@ def main() -> int:
             _, videos = source_videos()
             video_map = {(source, video["id"]): video for source, video, _, _ in videos}
             process_ready(db, video_map, workers=args.workers, max_new=args.max_new,
-                          once=args.once, poll_seconds=args.poll_seconds)
+                          once=args.once, poll_seconds=args.poll_seconds,
+                          task=partial(summary_task, extract_workers=args.extract_workers))
         finally:
             db.close()
     return 0

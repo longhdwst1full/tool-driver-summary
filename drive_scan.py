@@ -365,14 +365,14 @@ def main() -> int:
     parser.add_argument("--max-files", type=int, default=500)
     parser.add_argument("--curated-exclusions", action="store_true",
                         help="Bỏ qua các nhóm học và file quảng bá được chỉ định")
-    parser.add_argument("--workers", type=int, default=1,
-                        help="Số kết nối Drive song song; dùng 2-4 cho thư mục lớn")
+    parser.add_argument("--workers", type=int, default=4,
+                        help="Số kết nối Drive song song (mặc định 4, tối đa 8)")
     args = parser.parse_args()
     try:
         if args.max_files < 1:
             raise ValueError("--max-files phải lớn hơn 0")
-        if args.workers < 1 or args.workers > 4:
-            raise ValueError("--workers phải trong khoảng 1-4")
+        if args.workers < 1 or args.workers > 8:
+            raise ValueError("--workers phải trong khoảng 1-8")
         folder_id = folder_id_from(args.folder)
         service = google_service(args.credentials, args.token)
         report = scan_folder(service, folder_id, args.max_files,

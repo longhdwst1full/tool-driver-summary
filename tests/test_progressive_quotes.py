@@ -28,6 +28,45 @@ class ProgressiveQuoteTests(unittest.TestCase):
         self.assertEqual(result["qa"]["total_chunks"], 1)
         self.assertEqual(result["points"][0]["end"], "06:05")
 
+    def test_parallel_extract_keeps_chunk_order(self):
+        import re
+        import threading
+        import time
+
+        class Client:
+            def __init__(self):
+                self.lock = threading.Lock()
+                self.active = self.peak = 0
+
+            def generate(self, prompt, schema):
+                if "points" in schema["properties"]:
+                    with self.lock:
+                        self.active += 1
+                        self.peak = max(self.peak, self.active)
+                    self.wait_for_peer()
+                    with self.lock:
+                        self.active -= 1
+                    part = re.search(r"Phần số (\d+) của bài", prompt).group(0)
+                    return {"points": [{"kind": "concept", "text": part, "quote": part + " học"}]}
+                ids = [f"vid1234567:c{index:03d}:p01" for index in range(1, 4)]
+                return {"summary": "Ba phần.", "summary_point_ids": ids,
+                        "sections": [{"title": "Nội dung", "body": "Ba phần.", "point_ids": ids}],
+                        "questions": ["Bài có mấy phần?"]}
+
+            def wait_for_peer(self):
+                deadline = time.monotonic() + 1
+                while self.peak < 2 and time.monotonic() < deadline:
+                    time.sleep(0.005)
+
+        cues = [(f"{minute:02d}:00", f"{minute + 7:02d}:00", f"Phần số {index} của bài học. " * 20)
+                for index, minute in enumerate((0, 8, 16), 1)]
+        client = Client()
+        result = build_progressive(client, "Bài thử", "vid1234567", cues, workers=3)
+        self.assertGreaterEqual(client.peak, 2)
+        self.assertEqual([point["text"] for point in result["points"]],
+                         ["Phần số 1 của bài", "Phần số 2 của bài", "Phần số 3 của bài"])
+        self.assertEqual(result["extract_mode"], "parallel")
+
     def test_restore_only_source_whitespace(self):
         source = "Dữ liệu bán hàng\nđược phân tích theo từng tháng."
         points = [{"kind": "concept", "text": "Phân tích theo tháng",
