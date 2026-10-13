@@ -24,6 +24,15 @@ ROOT = Path(__file__).resolve().parent.parent
 VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{10,}$")
 PROFILE_ITEMS = ("Cookies", "Cookies-journal", "Preferences", "Secure Preferences",
                  "Web Data", "Local Storage", "IndexedDB")
+TRANSCRIPT_SCRIPT = (ROOT / "browser-demo" / "console-transcript.js").read_text(encoding="utf-8")
+
+
+class PageOpenError(TimeoutError):
+    """The current Chrome target can no longer open the requested Drive page."""
+
+
+class AccessDeniedError(ValueError):
+    """The signed-in account cannot view this Drive video."""
 
 
 class CDP:
@@ -74,115 +83,174 @@ def clone_profile(source: Path, target: Path, profile_name: str) -> None:
             shutil.copy2(item, destination / name)
 
 
-def capture(video_id: str, profile_source: Path, profile_name: str) -> dict:
-    with tempfile.TemporaryDirectory(prefix="getsub-private-") as directory:
-        temporary = Path(directory)
-        os.chmod(temporary, 0o700)
-        clone_profile(profile_source, temporary, profile_name)
-        log = (temporary / "chrome.log").open("wb")
-        process = subprocess.Popen([
+class CaptureSession:
+    """Keep one private Chrome process alive for several Drive videos."""
+
+    def __init__(self, profile_source: Path, profile_name: str):
+        self.temporary_directory = tempfile.TemporaryDirectory(prefix="getsub-private-")
+        self.temporary = Path(self.temporary_directory.name)
+        os.chmod(self.temporary, 0o700)
+        clone_profile(profile_source, self.temporary, profile_name)
+        self.log = (self.temporary / "chrome.log").open("wb")
+        self.process = subprocess.Popen([
             "google-chrome", "--headless=new", "--mute-audio", "--disable-extensions",
+            "--disable-component-update", "--disable-background-networking",
+            "--disable-features=OptimizationGuideOnDeviceModel,OptimizationGuideModelExecution",
             "--disable-sync", "--no-first-run", "--no-default-browser-check",
-            "--remote-debugging-port=0", f"--user-data-dir={temporary}",
+            "--remote-debugging-port=0", f"--user-data-dir={self.temporary}",
             f"--profile-directory={profile_name}", "about:blank",
-        ], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        ], stdout=self.log, stderr=subprocess.STDOUT, start_new_session=True,
+           env={**os.environ, "TMPDIR": str(self.temporary)})
+        self.client = None
         try:
-            port_file = temporary / "DevToolsActivePort"
+            port_file = self.temporary / "DevToolsActivePort"
             for _ in range(100):
                 if port_file.is_file():
                     break
-                if process.poll() is not None:
+                if self.process.poll() is not None:
                     raise RuntimeError("Chrome chạy ngầm đã thoát trước khi mở DevTools")
                 time.sleep(0.1)
             else:
                 raise TimeoutError("Chrome chạy ngầm không mở DevTools")
             port = port_file.read_text().splitlines()[0]
             base = f"http://127.0.0.1:{port}"
-            video_url = f"https://drive.google.com/file/d/{video_id}/view"
-            request = Request(base + "/json/new?" + quote(video_url, safe=""), method="PUT")
+            request = Request(base + "/json/new?" + quote("about:blank", safe=""), method="PUT")
             with urlopen(request, timeout=10) as response:
                 target = json.load(response)
-            client = CDP(target["webSocketDebuggerUrl"])
-            try:
-                for _ in range(60):
-                    state = client.evaluate('''(() => ({
-                      title: document.title,
-                      play: [...document.querySelectorAll('button')]
-                        .some(e => !e.disabled && /phát|play/i.test(e.getAttribute('aria-label') || ''))
-                    }))()''')
-                    if isinstance(state, dict) and state.get("play"):
-                        break
-                    time.sleep(0.5)
-                else:
-                    raise TimeoutError("Video không mở được trong Chrome chạy ngầm")
+            self.client = CDP(target["webSocketDebuggerUrl"])
+            self.client.call("Page.enable")
+        except Exception:
+            self.close()
+            raise
+
+    def capture(self, video_id: str) -> dict:
+        if self.process.poll() is not None or self.client is None:
+            raise RuntimeError("Chrome chạy ngầm đã dừng")
+        video_url = f"https://drive.google.com/file/d/{video_id}/view"
+        self.client.call("Page.navigate", {"url": video_url})
+        client = self.client
+        for _ in range(60):
+            state = client.evaluate('''(() => ({
+              title: document.title,
+              accessDenied: /yêu cầu truy cập bị từ chối|request access|access denied/i.test(
+                document.title + ' ' + (document.body?.innerText || '').slice(0, 600)),
+              play: [...document.querySelectorAll('button,[role="button"]')]
+                .some(e => !e.disabled && /phát|play/i.test((e.getAttribute('aria-label') || '') + ' ' + (e.innerText || '')))
+            }))()''')
+            if isinstance(state, dict) and state.get("accessDenied"):
+                raise AccessDeniedError("Tài khoản Google hiện tại không có quyền xem video Drive")
+            if isinstance(state, dict) and state.get("play"):
+                break
+            time.sleep(0.5)
+        else:
+            raise PageOpenError("Video không mở được trong Chrome chạy ngầm")
+        client.evaluate('''(() => {
+          const button = [...document.querySelectorAll('button,[role="button"]')]
+            .find(e => !e.disabled && /phát|play/i.test((e.getAttribute('aria-label') || '') + ' ' + (e.innerText || '')));
+          button?.click();
+          return !!button;
+        })()''')
+        transcript_state = {}
+        for attempt in range(60):
+            transcript_state = client.evaluate('''(() => {
+              const button = [...document.querySelectorAll('button,[role="button"],[role="tab"]')]
+                .find(e => /bản chép lời|transcript/i.test((e.getAttribute('aria-label') || '') + ' ' + (e.innerText || '')));
+              return {found: !!button, enabled: !!button && !button.disabled,
+                      video: !!document.querySelector('video')};
+            })()''')
+            if isinstance(transcript_state, dict) and transcript_state.get("enabled"):
+                break
+            if (attempt >= 20 and isinstance(transcript_state, dict)
+                    and transcript_state.get("found") and not transcript_state.get("video")):
+                break
+            if attempt and attempt % 10 == 0:
                 client.evaluate('''(() => {
-                  const button = [...document.querySelectorAll('button')]
-                    .find(e => !e.disabled && /phát|play/i.test(e.getAttribute('aria-label') || ''));
+                  const button = [...document.querySelectorAll('button,[role="button"]')]
+                    .find(e => !e.disabled && /phát|play/i.test((e.getAttribute('aria-label') || '') + ' ' + (e.innerText || '')));
                   button?.click();
-                  return !!button;
                 })()''')
-                for attempt in range(60):
-                    ready = client.evaluate('''(() => {
-                      const button = [...document.querySelectorAll('button')]
-                        .find(e => /bản chép lời|transcript/i.test(e.innerText || ''));
-                      return !!button && !button.disabled;
-                    })()''')
-                    if ready:
-                        break
-                    if attempt and attempt % 10 == 0:
-                        client.evaluate('''(() => {
-                          const button = [...document.querySelectorAll('button')]
-                            .find(e => !e.disabled && /phát|play/i.test(e.getAttribute('aria-label') || ''));
-                          button?.click();
-                        })()''')
-                    time.sleep(0.5)
-                else:
-                    raise TimeoutError("Bản chép lời không khả dụng trong phiên Chrome này")
-                client.evaluate('''(() => {
-                  const button = [...document.querySelectorAll('button')]
-                    .find(e => /bản chép lời|transcript/i.test(e.innerText || ''));
-                  button?.click();
-                  return !!button;
-                })()''')
-                for _ in range(60):
-                    count = client.evaluate('''(() => [...document.querySelectorAll('*')]
-                      .filter(e => e.scrollHeight - e.clientHeight > 100
-                        && e.getBoundingClientRect().left > innerWidth * .4
-                        && (e.innerText || '').match(/(?:^|\\n)\\s*\\d{1,2}:\\d{2}/g)?.length > 2)
-                      .length)()''')
-                    if count:
-                        break
-                    time.sleep(0.5)
-                else:
-                    raise TimeoutError("Panel bản chép lời không hiện dòng có thời gian")
-                source = (ROOT / "browser-demo" / "console-transcript.js").read_text()
-                for attempt in range(3):
-                    result = client.evaluate("window.__getsubReturnResult = true;\n" + source,
-                                             await_promise=True)
-                    if not isinstance(result, dict) or result.get("videoId") != video_id:
-                        raise ValueError("Bản thu không khớp video yêu cầu")
-                    if (result.get("atBottom") and result.get("startsNearZero")
-                            and result.get("rowCount", 0) >= 2):
-                        return result
-                    if attempt < 2:
-                        time.sleep(1)
-                raise ValueError("Panel bản chép lời chưa đủ mốc đầu/cuối sau 3 lần đọc")
-            finally:
-                client.close()
-        finally:
+            time.sleep(0.5)
+        if not isinstance(transcript_state, dict) or not transcript_state.get("enabled"):
+            detail = client.evaluate('''(() => ({
+              controls: [...document.querySelectorAll('button,[role="button"],[role="tab"]')]
+                .filter(e => /bản chép lời|transcript/i.test((e.getAttribute('aria-label') || '') + ' ' + (e.innerText || '')))
+                .map(e => ({disabled: !!e.disabled, ariaDisabled: e.getAttribute('aria-disabled'),
+                            hidden: e.getBoundingClientRect().width === 0})),
+              video: !!document.querySelector('video'),
+              googleLogin: /accounts\\.google\\.com/.test(location.href)
+            }))()''')
+            raise TimeoutError(f"Bản chép lời không khả dụng trong phiên Chrome này ({detail})")
+        client.evaluate('''(() => {
+          const button = [...document.querySelectorAll('button,[role="button"],[role="tab"]')]
+            .find(e => /bản chép lời|transcript/i.test((e.getAttribute('aria-label') || '') + ' ' + (e.innerText || '')));
+          button?.click();
+          return !!button;
+        })()''')
+        for _ in range(60):
+            count = client.evaluate('''(() => [...document.querySelectorAll('*')]
+              .filter(e => e.scrollHeight - e.clientHeight >= -1
+                && e.getBoundingClientRect().left > innerWidth * .4
+                && e.getBoundingClientRect().width > 150
+                && e.getBoundingClientRect().width < innerWidth * .55
+                && (e.innerText || '').match(/(?:^|\\n)\\s*\\d{1,2}:\\d{2}/g)?.length > 2)
+              .length)()''')
+            if count:
+                break
+            time.sleep(0.5)
+        else:
+            raise TimeoutError("Panel bản chép lời không hiện dòng có thời gian")
+        for attempt in range(3):
+            result = client.evaluate("window.__getsubReturnResult = true;\n" + TRANSCRIPT_SCRIPT,
+                                     await_promise=True)
+            if not isinstance(result, dict) or result.get("videoId") != video_id:
+                raise ValueError("Bản thu không khớp video yêu cầu")
+            if (result.get("atBottom") and result.get("startsNearZero")
+                    and result.get("rowCount", 0) >= 2):
+                return result
+            if attempt < 2:
+                time.sleep(1)
+        raise ValueError("Panel bản chép lời chưa đủ mốc đầu/cuối sau 3 lần đọc")
+
+    def close(self) -> None:
+        if self.client is not None:
             try:
-                os.killpg(process.pid, signal.SIGTERM)
+                self.client.close()
+            except OSError:
+                pass
+            self.client = None
+        if getattr(self, "process", None) is not None:
+            try:
+                os.killpg(self.process.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
             try:
-                process.wait(timeout=10)
+                self.process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    os.killpg(self.process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-                process.wait()
-            log.close()
+                self.process.wait()
+            self.process = None
+        if not self.log.closed:
+            self.log.close()
+        self.temporary_directory.cleanup()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+
+def capture(video_id: str, profile_source: Path, profile_name: str) -> dict:
+    with CaptureSession(profile_source, profile_name) as session:
+        return session.capture(video_id)
+
+
+capture.session_factory = CaptureSession
+capture.reset_session_errors = (PageOpenError,)
+capture.access_denied_errors = (AccessDeniedError,)
 
 
 def main() -> int:
@@ -192,6 +260,9 @@ def main() -> int:
                         default=Path.home() / ".config/google-chrome")
     parser.add_argument("--profile-name", default="Default")
     parser.add_argument("--ai", action="store_true", help="Tạo ghi chú bằng Codex sau khi nhập")
+    parser.add_argument("--scan", type=Path, default=ROOT / "drive-reports/scan.json")
+    parser.add_argument("--ui-dir", type=Path, default=ROOT / "drive-reports/ui-transcripts")
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "drive-reports/progressive-demo")
     args = parser.parse_args()
     if not VIDEO_ID.fullmatch(args.video_id) or "/" in args.profile_name or args.profile_name.startswith("."):
         parser.error("ID video hoặc tên profile không hợp lệ")
@@ -200,12 +271,15 @@ def main() -> int:
         with tempfile.TemporaryDirectory(prefix="getsub-import-") as directory:
             path = Path(directory) / f"getsub-transcript-{args.video_id}.json"
             path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            subprocess.run([sys.executable, str(ROOT / "import_ui_transcript.py"), str(path)],
+            subprocess.run([sys.executable, str(ROOT / "import_ui_transcript.py"), str(path),
+                            "--scan", str(args.scan), "--output-dir", str(args.ui_dir)],
                            cwd=ROOT, check=True)
         print(f"Đã thu {result['rowCount']} dòng; cuối panel: {result['atBottom']}", flush=True)
         if args.ai:
             subprocess.run([sys.executable, str(ROOT / "progressive_demo.py"),
-                            "--ui-video-id", args.video_id], cwd=ROOT, check=True)
+                            "--ui-video-id", args.video_id, "--scan", str(args.scan),
+                            "--ui-dir", str(args.ui_dir), "--output-dir", str(args.output_dir)],
+                           cwd=ROOT, check=True)
         return 0
     except (OSError, ValueError, RuntimeError, TimeoutError, subprocess.CalledProcessError) as exc:
         print(f"Lỗi thu ngầm: {exc}", file=sys.stderr)

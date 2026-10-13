@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from hashlib import sha256
+from html.parser import HTMLParser
 from io import BytesIO
 import json
 import os
@@ -25,15 +26,131 @@ MAX_DOCUMENT_BYTES = 10_000_000
 PDF_MIME = "application/pdf"
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 TEXT_MIME = "text/plain"
+MARKDOWN_MIME = "text/markdown"
+WORD_MIME = "application/msword"
+GOOGLE_DOC_MIME = "application/vnd.google-apps.document"
+LEGACY_PPT_MIME = "application/vnd.ms-powerpoint"
 PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+HTML_MIME = "text/html"
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+XLSM_MIME = "application/vnd.ms-excel.sheet.macroEnabled.12"
+XLS_MIME = "application/vnd.ms-excel"
+GOOGLE_SHEET_MIME = "application/vnd.google-apps.spreadsheet"
+
+
+class DocumentHTMLParser(HTMLParser):
+    """Keep visible text from HTML files stored with a .doc extension."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self.hidden = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {"script", "style"}:
+            self.hidden += 1
+        elif tag in {"p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4"}:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in {"script", "style"}:
+            self.hidden = max(0, self.hidden - 1)
+        elif tag in {"p", "div", "li", "tr", "h1", "h2", "h3", "h4"}:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if not self.hidden:
+            self.parts.append(data)
+
+
+def decode_document_text(raw: bytes) -> str:
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16")
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.decode("utf-16")
+
+
+def effective_document_mime(name: str, mime_type: str) -> str:
+    """Use a known extension when Drive labels a document as generic binary."""
+    if mime_type != "application/octetstream":
+        return mime_type
+    return {".pdf": PDF_MIME, ".docx": DOCX_MIME, ".pptx": PPTX_MIME,
+            ".doc": WORD_MIME, ".txt": TEXT_MIME, ".md": MARKDOWN_MIME,
+            ".html": HTML_MIME, ".htm": HTML_MIME, ".xlsx": XLSX_MIME,
+            ".xlsm": XLSM_MIME, ".xls": XLS_MIME}.get(
+                Path(name).suffix.casefold(), mime_type)
 
 
 def extract_text(raw: bytes, mime_type: str) -> str:
-    if mime_type == TEXT_MIME:
+    if mime_type in {TEXT_MIME, MARKDOWN_MIME}:
+        return decode_document_text(raw)
+    if mime_type == HTML_MIME:
+        parser = DocumentHTMLParser()
+        parser.feed(decode_document_text(raw))
+        return re.sub(r"\n[ \t]*\n[ \t]*\n+", "\n\n", "".join(parser.parts))
+    if mime_type in {XLSX_MIME, XLSM_MIME}:
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(BytesIO(raw), read_only=True, data_only=True)
         try:
-            return raw.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            return raw.decode("utf-16")
+            sections = []
+            for sheet in workbook.worksheets:
+                lines = ["\t".join("" if value is None else str(value) for value in row).rstrip("\t")
+                         for row in sheet.iter_rows(values_only=True)]
+                sections.append(f"[Trang tính {sheet.title}]\n" + "\n".join(line for line in lines if line))
+            return "\n\n".join(sections)
+        finally:
+            workbook.close()
+    if mime_type == XLS_MIME:
+        if not shutil.which("libreoffice"):
+            raise RuntimeError("Thiếu LibreOffice để đọc file Excel .xls")
+        with TemporaryDirectory(prefix="getsub-xls-") as folder:
+            source = Path(folder) / "input.xls"
+            source.write_bytes(raw)
+            command = ["libreoffice", "-env:UserInstallation=" + (Path(folder) / "profile").as_uri(),
+                       "--headless", "--convert-to", "xlsx", "--outdir", folder, str(source)]
+            result = subprocess.run(command, capture_output=True, timeout=90, check=False)
+            converted = Path(folder) / "input.xlsx"
+            if result.returncode != 0 or not converted.is_file():
+                raise ValueError("LibreOffice không chuyển được Excel .xls")
+            return extract_text(converted.read_bytes(), XLSX_MIME)
+    if mime_type == WORD_MIME:
+        if raw.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+            if not shutil.which("catdoc"):
+                raise RuntimeError("Thiếu catdoc để đọc file Word .doc")
+            with TemporaryDirectory(prefix="getsub-doc-") as folder:
+                source = Path(folder) / "input.doc"
+                source.write_bytes(raw)
+                result = subprocess.run(["catdoc", "-w", "-d", "utf-8", str(source)],
+                                        capture_output=True, timeout=45, check=False)
+            if result.returncode != 0:
+                raise ValueError("catdoc không đọc được file Word .doc")
+            return result.stdout.decode("utf-8", errors="replace")
+        if raw.lstrip().lower().startswith((b"<html", b"<!doctype html")) or raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+            text = decode_document_text(raw)
+            if not text.lstrip().lower().startswith(("<html", "<!doctype html")):
+                raise ValueError("File .doc không có cấu trúc Word hoặc HTML")
+            parser = DocumentHTMLParser()
+            parser.feed(text)
+            return re.sub(r"\n[ \t]*\n[ \t]*\n+", "\n\n", "".join(parser.parts))
+        raise ValueError("File .doc không có cấu trúc Word hoặc HTML")
+    if mime_type == LEGACY_PPT_MIME:
+        if not raw.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+            raise ValueError("File .ppt không có cấu trúc PowerPoint cũ")
+        if not shutil.which("libreoffice"):
+            raise RuntimeError("Thiếu LibreOffice để đọc file PowerPoint .ppt")
+        with TemporaryDirectory(prefix="getsub-ppt-") as folder:
+            source = Path(folder) / "input.ppt"
+            source.write_bytes(raw)
+            command = ["libreoffice", "-env:UserInstallation=" + (Path(folder) / "profile").as_uri(),
+                       "--headless", "--convert-to", "pptx", "--outdir", folder, str(source)]
+            result = subprocess.run(command, capture_output=True, timeout=90, check=False)
+            converted = Path(folder) / "input.pptx"
+            if result.returncode != 0 or not converted.is_file():
+                raise ValueError("LibreOffice không chuyển được PowerPoint .ppt")
+            return extract_text(converted.read_bytes(), PPTX_MIME)
     if mime_type == PDF_MIME:
         from pypdf import PdfReader
 
@@ -83,11 +200,11 @@ def ocr_pdf(raw: bytes) -> str:
         else:
             pdf = root / "input.pdf"
             pdf.write_bytes(raw)
-            command = ["pdftoppm", "-f", "1", "-l", "40", "-r", "160", "-png", str(pdf), str(root / "page")]
+            command = ["pdftoppm", "-f", "1", "-l", "40", "-r", "120", "-jpeg", str(pdf), str(root / "page")]
             run = subprocess.run(command, capture_output=True, text=True, timeout=180)
             if run.returncode != 0:
                 raise RuntimeError(f"Không chuyển được PDF sang ảnh: {run.stderr[-300:]}")
-            images = sorted(root.glob("page-*.png"))
+            images = sorted(root.glob("page-*.jpg"))
         sections = []
         for index, image in enumerate(images, 1):
             run = subprocess.run([tesseract, str(image), "stdout", "-l", "vie+eng"],
@@ -101,7 +218,7 @@ def ocr_pdf(raw: bytes) -> str:
 
 def save_manifest(path: Path, scan: dict, results: list[dict]) -> dict:
     counts = {status: sum(x["status"] == status for x in results) for status in (
-        "ok", "excluded", "needs_ocr", "too_large", "unsupported", "no_access", "error"
+        "ok", "excluded", "empty", "needs_ocr", "too_large", "unsupported", "no_access", "error"
     )}
     manifest = {"folder_id": scan["folder"]["id"], "total": len(results), **counts, "files": results}
     temporary = path.with_suffix(".tmp")
@@ -159,6 +276,13 @@ def process_documents(service, scan: dict, output_dir: Path, max_bytes: int = MA
             legacy_path = safe_output_file(output_dir, item["id"] + ".txt", ".txt")
             old_name = prior.get("output", item["id"] + ".txt") if prior else item["id"] + ".txt"
             old_path = safe_output_file(output_dir, old_name, ".txt")
+            mime_type = effective_document_mime(item["name"], item["mime_type"])
+            if item["name"].startswith("~$") and Path(item["name"]).suffix.casefold() in {".doc", ".docx", ".ppt", ".pptx"}:
+                entry.update({"status": "excluded", "reason": "File khóa tạm của Office"})
+                results.append(entry)
+                if len(results) % 50 == 0:
+                    save_manifest(manifest_path, scan, results)
+                continue
             if is_promotional_document(item):
                 if old_path.is_file() and is_promotional_document(item, old_path.read_text(encoding="utf-8")):
                     old_path.unlink()
@@ -168,7 +292,8 @@ def process_documents(service, scan: dict, output_dir: Path, max_bytes: int = MA
                     save_manifest(manifest_path, scan, results)
                 continue
             if (not refresh and prior and prior.get("modified_time") == item.get("modified_time")
-                    and prior.get("status") in ({"no_access"} if ocr else {"needs_ocr", "no_access"})):
+                    and prior.get("status") in ({"empty", "no_access"} if ocr else
+                                                {"empty", "needs_ocr", "no_access"})):
                 entry.update(prior)
                 results.append(entry)
                 if len(results) % 50 == 0:
@@ -215,23 +340,32 @@ def process_documents(service, scan: dict, output_dir: Path, max_bytes: int = MA
                     continue
             if item.get("can_download") is False:
                 entry.update({"status": "no_access"})
+            elif item.get("size") == 0 and mime_type != GOOGLE_DOC_MIME:
+                entry.update({"status": "empty", "bytes": 0})
             elif item.get("size") and item["size"] > max_bytes:
                 entry.update({"status": "too_large", "bytes": item["size"]})
-            elif item["mime_type"] not in {PDF_MIME, DOCX_MIME, TEXT_MIME, PPTX_MIME}:
+            elif mime_type not in {PDF_MIME, DOCX_MIME, TEXT_MIME, MARKDOWN_MIME,
+                                   WORD_MIME, GOOGLE_DOC_MIME, PPTX_MIME, LEGACY_PPT_MIME,
+                                   HTML_MIME, XLSX_MIME, XLSM_MIME, XLS_MIME, GOOGLE_SHEET_MIME}:
                 entry.update({"status": "unsupported"})
             else:
-                raw = download_media(service, item["id"], item.get("size"), max_bytes)
+                raw = (service.files().export_media(fileId=item["id"],
+                                                    mimeType="text/csv" if mime_type == GOOGLE_SHEET_MIME else TEXT_MIME).execute()
+                       if mime_type in {GOOGLE_DOC_MIME, GOOGLE_SHEET_MIME} else
+                       download_media(service, item["id"], item.get("size"), max_bytes))
                 if len(raw) > max_bytes:
                     entry.update({"status": "too_large", "bytes": len(raw)})
                 else:
-                    if item["mime_type"] == PDF_MIME and raw.startswith((b"\xff\xd8", b"\x89PNG")):
+                    if mime_type == PDF_MIME and raw.startswith((b"\xff\xd8", b"\x89PNG")):
                         content = ocr_pdf(raw).strip() if ocr else ""
                     else:
-                        content = extract_text(raw, item["mime_type"]).strip()
-                        if not content and ocr and item["mime_type"] == PDF_MIME:
+                        content = extract_text(raw, TEXT_MIME if mime_type in {GOOGLE_DOC_MIME, GOOGLE_SHEET_MIME}
+                                               else mime_type).strip()
+                        if not content and ocr and mime_type == PDF_MIME:
                             content = ocr_pdf(raw).strip()
                     if not content:
-                        entry.update({"status": "needs_ocr", "bytes": len(raw)})
+                        entry.update({"status": "needs_ocr" if mime_type == PDF_MIME else "empty",
+                                      "bytes": len(raw)})
                     elif is_promotional_document(item, content):
                         entry.update({"status": "excluded", "bytes": len(raw),
                                       "reason": "Tài liệu quảng cáo Khóa học giá hời"})

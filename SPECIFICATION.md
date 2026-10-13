@@ -4,7 +4,7 @@
 
 - Một thư mục Google Drive, quét đệ quy bằng quyền chỉ đọc; ID file là khóa liên kết ổn định.
 - Video có file phụ đề `.srt`/`.vtt` riêng được ghép với phụ đề theo manifest quét.
-- Tài liệu PDF, DOCX, PPTX, TXT; file quảng cáo Khóa học giá hời bị loại.
+- Tài liệu PDF, DOC/DOCX, PPT/PPTX, TXT, Markdown và Google Docs; file quảng cáo Khóa học giá hời và file khóa tạm Office bị loại. File gắn MIME chung được nhận theo đuôi đã biết và kiểm tra nội dung khi trích xuất.
 - PDF ảnh được OCR cục bộ khi dùng `drive_documents.py --ocr`. Chữ OCR cần đối chiếu bản gốc.
 
 ## Đầu ra và tên file
@@ -27,7 +27,7 @@
 
 ## Kiểm tra và trạng thái lỗi
 
-- Tài liệu lưu manifest sau từng file. Các trạng thái gồm `ok`, `excluded`, `needs_ocr`, `too_large`, `unsupported`, `no_access`, `error`.
+- Tài liệu lưu manifest mỗi 50 file và lúc kết thúc. Các trạng thái gồm `ok`, `excluded`, `empty`, `needs_ocr`, `too_large`, `unsupported`, `no_access`, `error`; `needs_ocr` chỉ dành cho PDF chưa đọc được chữ.
 - Bài học được kiểm tra ID nguồn, quote, độ phủ phụ đề tối thiểu 85% và cấu trúc quiz. Lỗi được sửa tối đa hai lần; còn lỗi thì `needs_review`, không đưa vào tổng hợp khóa.
 - `qa_report.py` kiểm toán lại đầu ra sau batch. Kiểm tra tự động không khẳng định độ chính xác ngữ nghĩa hoặc tính dễ đọc.
 - Tìm kiếm chỉ lập chỉ mục chunk của bài đã qua QA. Câu trả lời AI bị từ chối nếu dẫn ID chunk không nằm trong nguồn truy xuất.

@@ -21,9 +21,13 @@ from urllib.parse import parse_qs, urlparse
 from drive_scan import video_source_status
 from getsub_demo import format_time, parse_captions
 from import_ui_transcript import validate_export
+from mongo_catalog import (content_from_db, course_search_from_db, library_from_db,
+                           optional_database, recent_lessons_from_db,
+                           save_recent_lessons, source_catalog_from_db)
 from output_layout import (is_promotional_document, natural_key, output_paths,
                            safe_output_file, safe_segment, video_title)
 from study_pack import manual_note_paths
+from web_auth import authorized
 
 
 ROOT = Path(__file__).resolve().parent
@@ -36,8 +40,99 @@ JOBS_LOCK = Lock()
 NEW_SOURCE_FOLDERS = {
     "1GwuGmZuGk04LuvgwLUl9ahdZ1NW-2xqF": "Khóa Học Giá Hời 2026",
     "1pjNn2Wc_f5dLEfF023m5jvMEyF2s2fWj": "Khóa Học Giá Hời 2026 2",
+    "1Q730gr6P3wX-PB_yO8E872_RajP-F85R": "Khóa Học Afa Wealth Intelligence",
+    "1dFWmj2DQ8oSh4wN8gNLNz5amgAJ5HP7V": "Khóa Học Product Management 101",
+    "1in6wYR7Bv3jvZ4Rs5lr9p_s5XTy3Pv74": "Khóa Học CAPM",
+    "1gmPuPWfliG5Vbv86bX1dHMnLAXLl4ORB": "Khóa Học AI For PM 2026",
+    "1v4RV6kSdBIquRN-y23kPAEMQhiGABYMM": "Khóa Học Trở Thành Project Manager",
 }
 SOURCE_CACHE: dict[str, tuple] = {}
+COURSE_SEARCH_CACHE: dict[str, tuple] = {}
+
+
+def source_note_path(source_dir: Path, scan: dict, video: dict, extension: str) -> Path | None:
+    prefix = scan["folder"]["name"] + "/"
+    if not video["path"].startswith(prefix):
+        return None
+    parts = video["path"][len(prefix):].split("/")
+    relative = Path(*(safe_segment(part) for part in parts[:-1]),
+                    safe_segment(video_title(video["name"])) + f"-{video['id'][:8]}{extension}")
+    return safe_output_file(source_dir / "progressive-demo", relative, extension)
+
+
+def source_video_status(source_id: str, video_id: str, scan: dict | None = None,
+                        video: dict | None = None) -> tuple[dict | None, dict | None]:
+    """Only expose a UI transcript and note after validating their source and QA."""
+    if source_id not in NEW_SOURCE_FOLDERS or not SAFE_ID.fullmatch(video_id):
+        return None, None
+    source_dir = REPORTS / "new-sources" / source_id
+    scan = scan or read_json(source_dir / "scan.json", {"items": []})
+    video = video or next((row for row in scan.get("items", []) if row.get("kind") == "video"
+                           and row.get("id") == video_id), None)
+    if video is None:
+        return None, None
+    ui_dir = source_dir / "ui-transcripts"
+    json_path = safe_output_file(ui_dir, video_id + ".json", ".json")
+    srt_path = safe_output_file(ui_dir, video_id + ".srt", ".srt")
+    if not json_path.is_file() or not srt_path.is_file() or json_path.stat().st_size > 5_000_000:
+        return None, None
+    try:
+        data = read_json(json_path)
+        _, rows = validate_export(data, scan)
+        cues = parse_captions(srt_path.read_text(encoding="utf-8"))
+        if len(cues) != len(rows):
+            return None, None
+    except (OSError, KeyError, TypeError, ValueError):
+        return None, None
+    transcript = {"row_count": len(rows), "last_at": rows[-1]["at"]}
+    note_path = source_note_path(source_dir, scan, video, ".json")
+    note_md = source_note_path(source_dir, scan, video, ".md")
+    if (note_path is None or note_md is None or not note_path.is_file() or not note_md.is_file()
+            or note_path.stat().st_size > 2_000_000 or note_md.stat().st_size > 2_000_000):
+        return transcript, None
+    try:
+        note = read_json(note_path)
+        current_hash = sha256("\n".join(str((format_time(cue.start_ms),
+                                            format_time(cue.end_ms), cue.text)) for cue in cues).encode()).hexdigest()
+        qa = note["qa"]
+        if (note.get("caption_id") != video_id or note.get("source_kind") != "drive_ui_transcript"
+                or note.get("source_sha256") != current_hash or qa.get("status") != "ok"
+                or not isinstance(qa.get("total_chunks"), int) or qa["total_chunks"] < 1
+                or qa.get("covered_chunks") != qa["total_chunks"]):
+            return transcript, None
+    except (OSError, KeyError, TypeError, ValueError):
+        return transcript, None
+    return transcript, {"status": "ok", "covered_chunks": qa["covered_chunks"]}
+
+
+def course_search(query: str) -> dict | None:
+    """Search folder names across all approved scans with a compact per-scan cache."""
+    needle = query.casefold().strip()
+    if len(needle) < 2 or len(needle) > 100:
+        return None
+    matches = []
+    for source_id in NEW_SOURCE_FOLDERS:
+        source_dir = REPORTS / "new-sources" / source_id
+        path = source_dir / "scan.json"
+        if not path.is_file():
+            path = source_dir / "scan.checkpoint.json"
+        if not path.is_file():
+            continue
+        signature = (str(path), path.stat().st_mtime_ns, path.stat().st_size)
+        cached = COURSE_SEARCH_CACHE.get(source_id)
+        if cached is None or cached[0] != signature:
+            report = read_json(path)
+            folder = report.get("folder") or {"id": source_id, "name": report.get("root_name", NEW_SOURCE_FOLDERS[source_id])}
+            rows = [{"source_id": source_id, "id": source_id, "name": folder["name"],
+                     "path": folder["name"]}]
+            rows.extend({"source_id": source_id, "id": row["id"], "name": row["name"],
+                         "path": row["path"]} for row in report.get("items", []) if row.get("kind") == "folder")
+            COURSE_SEARCH_CACHE[source_id] = (signature, rows)
+        matches.extend(row for row in COURSE_SEARCH_CACHE[source_id][1]
+                       if needle in row["name"].casefold())
+    matches.sort(key=lambda row: (not row["name"].casefold().startswith(needle),
+                                  row["path"].count("/"), natural_key(row["name"])))
+    return {"query": query.strip(), "total": len(matches), "items": matches[:80]}
 
 
 def read_json(path: Path, fallback: dict | None = None) -> dict:
@@ -91,6 +186,12 @@ def document_type(name: str, mime_type: str | None = None) -> str:
         return "docx"
     if mime_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation" or suffix in {".ppt", ".pptx"}:
         return "pptx"
+    if mime_type in {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     "application/vnd.ms-excel.sheet.macroEnabled.12", "application/vnd.ms-excel",
+                     "application/vnd.google-apps.spreadsheet"} or suffix in {".xlsx", ".xlsm", ".xls"}:
+        return "spreadsheet"
+    if mime_type == "text/html" or suffix in {".html", ".htm"}:
+        return "html"
     if suffix in {".md", ".markdown"}:
         return "markdown"
     if suffix == ".txt" and Path(name[:-4].lower()).suffix in {".yml", ".yaml", ".json", ".py", ".js", ".ts", ".sh", ".xml", ".html", ".css"}:
@@ -276,7 +377,7 @@ def library() -> dict:
 
 def source_catalog(source_id: str | None = None, parent_id: str | None = None,
                    offset: int = 0, query: str = "", kind: str = "") -> dict | None:
-    """Browse the two filtered scans without loading every video into the web page."""
+    """Browse approved filtered scans without loading every video into the web page."""
     if source_id is not None and source_id not in NEW_SOURCE_FOLDERS:
         return None
     if offset < 0 or offset > 500_000 or len(query) > 100 or kind not in {"", "video", "document", "transcript", "folder"}:
@@ -288,6 +389,9 @@ def source_catalog(source_id: str | None = None, parent_id: str | None = None,
         checkpoint = location / "scan.checkpoint.json"
         path = final if final.is_file() else checkpoint
         signature = (str(path), path.stat().st_mtime_ns, path.stat().st_size) if path.is_file() else None
+        progress_path = location / "ui-transcripts/batch-manifest.json"
+        if summary_only and progress_path.is_file():
+            signature = (signature, progress_path.stat().st_mtime_ns, progress_path.stat().st_size)
         cache_key = f"{REPORTS}:{folder_id}:{'summary' if summary_only else 'index'}"
         cached = SOURCE_CACHE.get(cache_key)
         if cached and cached[0] == signature:
@@ -306,6 +410,8 @@ def source_catalog(source_id: str | None = None, parent_id: str | None = None,
                    "total": len(items), "counts": dict(counts),
                    "excluded": {"folders": skipped.get("folders", 0),
                                 "files": skipped.get("files", 0)}}
+        if summary_only and progress_path.is_file():
+            summary["transcript_progress"] = read_json(progress_path, {}).get("counts", {})
         if summary_only:
             snapshot = {"summary": summary}
             SOURCE_CACHE[cache_key] = (signature, snapshot)
@@ -381,6 +487,10 @@ def source_catalog(source_id: str | None = None, parent_id: str | None = None,
                "transcript_status": transcript_status.get(item["id"]),
                "document_status": document_status.get(item["id"])}
             for item in children[offset:offset + 200]]
+    for item, original in zip(page, children[offset:offset + 200]):
+        if item["kind"] == "video":
+            item["ui_transcript"], item["progressive_note"] = source_video_status(
+                source_id, item["id"], {"folder": folder, "items": [original]}, original)
     return {"source": snapshot["summary"],
             "parent_id": parent_id, "ancestors": ancestors, "items": page,
             "total_children": len(children), "offset": offset,
@@ -390,8 +500,29 @@ def source_catalog(source_id: str | None = None, parent_id: str | None = None,
 
 def source_file_content(source_id: str, kind: str, file_id: str) -> dict | None:
     """Read only extracted files listed by one of the approved source manifests."""
-    if source_id not in NEW_SOURCE_FOLDERS or kind not in {"transcript", "document"} or not SAFE_ID.fullmatch(file_id):
+    if source_id not in NEW_SOURCE_FOLDERS or kind not in {"transcript", "document", "ui_transcript", "progressive_note"} or not SAFE_ID.fullmatch(file_id):
         return None
+    if kind in {"ui_transcript", "progressive_note"}:
+        transcript, note = source_video_status(source_id, file_id)
+        if kind == "ui_transcript" and not transcript or kind == "progressive_note" and not note:
+            return None
+        source_dir = REPORTS / "new-sources" / source_id
+        if kind == "ui_transcript":
+            path = safe_output_file(source_dir / "ui-transcripts", file_id + ".srt", ".srt")
+        else:
+            scan = read_json(source_dir / "scan.json", {"items": []})
+            video = next((row for row in scan["items"] if row.get("kind") == "video" and row.get("id") == file_id), None)
+            if video is None:
+                return None
+            path = source_note_path(source_dir, scan, video, ".md")
+        if path is None or not path.is_file():
+            return None
+        try:
+            content = path.read_text(encoding="utf-8")[:1_000_001]
+        except OSError:
+            return None
+        return {"kind": kind, "document_type": None, "content": content[:1_000_000],
+                "truncated": len(content) > 1_000_000}
     source_dir = REPORTS / "new-sources" / source_id
     section = "transcripts" if kind == "transcript" else "documents"
     manifest = read_json(source_dir / section / "manifest.json", {"files": []})
@@ -587,15 +718,43 @@ class Handler(BaseHTTPRequestHandler):
                      "application/json; charset=utf-8")
 
     def allowed_host(self) -> bool:
-        return self.headers.get("Host", "").split(":")[0] in {"127.0.0.1", "localhost"}
+        configured = ({host.strip().casefold() for host in
+                       os.environ.get("WEB_ALLOWED_HOSTS", "").split(",") if host.strip()}
+                      if os.environ.get("WEB_PASSWORD_HASH") else set())
+        return self.headers.get("Host", "").split(":")[0].casefold() in (
+            {"127.0.0.1", "localhost"} | configured)
+
+    def require_auth(self) -> bool:
+        if authorized(self.headers.get("Authorization")):
+            return False
+        body = b"Dang nhap de xem Drive Studio"
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="Drive Studio", charset="UTF-8"')
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+        return True
+
+    def db_read(self, reader, *args):
+        db = optional_database()
+        if db is None:
+            return None
+        try:
+            return reader(db, *args)
+        except Exception:
+            return None
 
     def do_GET(self) -> None:
         if not self.allowed_host():
             self.json_response(403, {"error": "Chỉ cho phép truy cập từ máy này"})
             return
+        if self.require_auth():
+            return
         route = urlparse(self.path).path
-        if route in {"/", "/styles.css", "/app.js"}:
-            filename = "index.html" if route == "/" else route[1:]
+        if route in {"/", "/styles.css", "/app.js", "/viewer", "/viewer.css", "/viewer.js"}:
+            filename = "index.html" if route == "/" else "viewer.html" if route == "/viewer" else route[1:]
             mime = "text/html" if filename.endswith(".html") else (
                 "text/css" if filename.endswith(".css") else "text/javascript")
             self.respond(200, (WEB / filename).read_bytes(), mime + "; charset=utf-8")
@@ -603,46 +762,94 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/bootstrap":
             self.json_response(200, {"token": TOKEN})
         elif route == "/api/library":
-            self.json_response(200, library())
+            self.json_response(200, self.db_read(library_from_db) or library())
         elif route == "/api/source-catalog":
             query = parse_qs(urlparse(self.path).query)
             try:
                 offset = int(query.get("offset", ["0"])[0])
             except ValueError:
                 offset = -1
-            result = source_catalog(query.get("source", [None])[0],
-                                    query.get("parent", [None])[0], offset,
-                                    query.get("q", [""])[0], query.get("kind", [""])[0])
+            arguments = (query.get("source", [None])[0], query.get("parent", [None])[0],
+                         offset, query.get("q", [""])[0], query.get("kind", [""])[0])
+            result = self.db_read(source_catalog_from_db, *arguments)
+            if arguments[0] is None and result and len(result["sources"]) < len(NEW_SOURCE_FOLDERS):
+                result = None
+            result = result or source_catalog(*arguments)
             self.json_response(200, result) if result else self.json_response(404, {"error": "Nguồn Drive không tồn tại"})
+        elif route == "/api/course-search":
+            query = parse_qs(urlparse(self.path).query).get("q", [""])[0]
+            result = self.db_read(course_search_from_db, query)
+            db_sources = self.db_read(source_catalog_from_db) if result is not None else None
+            if result is not None and (db_sources is None or
+                                       len(db_sources["sources"]) < len(NEW_SOURCE_FOLDERS)):
+                result = None
+            result = result or course_search(query)
+            self.json_response(200, result) if result else self.json_response(400, {"error": "Nhập ít nhất 2 ký tự để tìm khóa học"})
+        elif route == "/api/preferences":
+            if not os.environ.get("WEB_PASSWORD_HASH"):
+                self.json_response(503, {"error": "Cần bật đăng nhập để đồng bộ lịch sử học"})
+                return
+            recent = self.db_read(recent_lessons_from_db, os.environ.get("WEB_USERNAME", "admin"))
+            self.json_response(200, {"recent_lessons": recent}) if recent is not None else self.json_response(503, {"error": "MongoDB chưa sẵn sàng"})
         elif route == "/api/source-file":
             query = parse_qs(urlparse(self.path).query)
-            result = source_file_content(query.get("source", [""])[0],
-                                         query.get("kind", [""])[0], query.get("id", [""])[0])
+            source_id, kind, file_id = (query.get(key, [""])[0]
+                                        for key in ("source", "kind", "id"))
+            result = self.db_read(content_from_db, kind, file_id, source_id) \
+                if source_id in NEW_SOURCE_FOLDERS and kind in {
+                    "transcript", "document", "ui_transcript", "progressive_note"} else None
+            result = result or source_file_content(source_id, kind, file_id)
             self.json_response(200, result) if result else self.json_response(404, {"error": "Không tìm thấy nội dung"})
         elif route == "/api/jobs":
             with JOBS_LOCK:
                 self.json_response(200, {"jobs": [dict(row) for row in JOBS]})
         elif route == "/api/file":
             query = parse_qs(urlparse(self.path).query)
-            result = file_content(query.get("kind", [""])[0], query.get("id", [""])[0])
+            kind, file_id = (query.get(key, [""])[0] for key in ("kind", "id"))
+            result = self.db_read(content_from_db, kind, file_id) or file_content(kind, file_id)
             self.json_response(200, result) if result else self.json_response(404, {"error": "Không tìm thấy nội dung"})
         else:
             self.json_response(404, {"error": "Đường dẫn không tồn tại"})
 
     def do_POST(self) -> None:
-        if not self.allowed_host() or self.headers.get("X-Drive-Studio-Token") != TOKEN:
+        if not self.allowed_host():
+            self.json_response(403, {"error": "Chỉ cho phép truy cập từ máy này"})
+            return
+        if self.require_auth():
+            return
+        if self.headers.get("X-Drive-Studio-Token") != TOKEN:
             self.json_response(403, {"error": "Yêu cầu không hợp lệ"})
             return
-        if urlparse(self.path).path != "/api/jobs":
+        route = urlparse(self.path).path
+        if route not in {"/api/jobs", "/api/preferences"}:
             self.json_response(404, {"error": "Đường dẫn không tồn tại"})
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
-            if length < 1 or length > 4096:
+            if length < 1 or length > (32_768 if route == "/api/preferences" else 4096):
                 raise ValueError("Kích thước yêu cầu không hợp lệ")
             data = json.loads(self.rfile.read(length))
             if not isinstance(data, dict):
                 raise ValueError("Yêu cầu phải là một đối tượng JSON")
+            if route == "/api/preferences":
+                if not os.environ.get("WEB_PASSWORD_HASH"):
+                    self.json_response(503, {"error": "Cần bật đăng nhập để đồng bộ lịch sử học"})
+                    return
+                db = optional_database()
+                if db is None:
+                    self.json_response(503, {"error": "MongoDB chưa sẵn sàng"})
+                    return
+                try:
+                    recent = save_recent_lessons(db, os.environ.get("WEB_USERNAME", "admin"),
+                                                 data.get("recent_lessons"))
+                except ValueError:
+                    self.json_response(400, {"error": "Danh sách bài học gần đây không hợp lệ"})
+                    return
+                except Exception:
+                    self.json_response(503, {"error": "MongoDB chưa sẵn sàng"})
+                    return
+                self.json_response(200, {"recent_lessons": recent})
+                return
             job = start_job(data.get("action", ""), data.get("caption_id"))
             self.json_response(202, job)
         except (ValueError, json.JSONDecodeError) as exc:

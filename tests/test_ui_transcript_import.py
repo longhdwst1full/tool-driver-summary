@@ -43,6 +43,18 @@ class UiTranscriptImportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "không thuộc"):
             validate_export(export, {"items": []})
 
+    def test_accept_silent_intro_but_reject_missing_early_panel(self):
+        scan, export = self.sample()
+        export["rows"][0]["at"] = "0:11"
+        export["rows"][1]["at"] = "0:16"
+        export["rows"][2]["at"] = "0:21"
+        validate_export(export, scan)
+        export["rows"][0]["at"] = "0:31"
+        export["rows"][1]["at"] = "0:36"
+        export["rows"][2]["at"] = "0:41"
+        with self.assertRaisesRegex(ValueError, "mốc đầu"):
+            validate_export(export, scan)
+
 
 if __name__ == "__main__":
     unittest.main()

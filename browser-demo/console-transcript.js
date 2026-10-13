@@ -18,7 +18,7 @@
       const text = el.innerText || '';
       const stamps = (text.match(/(?:^|\n)\s*\d{1,2}:\d{2}(?::\d{2})?\s*(?=\n|$)/g) || []).length;
       return { el, rect, stamps, distance: el.scrollHeight - el.clientHeight };
-    }).filter(item => item.stamps >= 2 && item.distance > 40
+    }).filter(item => item.stamps >= 2 && item.distance >= -1
       && item.rect.width > 150 && item.rect.width < innerWidth * 0.55
       && item.rect.left > innerWidth * 0.4 && item.rect.height > 120);
     candidates.sort((a, b) => b.stamps - a.stamps || b.distance - a.distance);
@@ -109,7 +109,8 @@
   const result = {
     source: 'drive_ui', videoId, url: location.href,
     rowCount: rows.length, atBottom,
-    startsNearZero: rows.length > 0 && seconds(rows[0].at) <= 5,
+    // An intro can be silent; the first spoken line may start after the video begins.
+    startsNearZero: rows.length > 0 && seconds(rows[0].at) <= 30,
     rows,
   };
   if (!rows.length) throw new Error('Không đọc được dòng bản chép lời nào từ panel.');

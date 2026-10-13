@@ -53,7 +53,7 @@ def validate_export(data: dict, scan: dict) -> tuple[str, list[dict]]:
         if position < previous or not row["text"].strip() or len(row["text"]) > 3000:
             raise ValueError("Dòng transcript rỗng, quá dài hoặc sai thứ tự")
         previous = position
-    if seconds(rows[0]["at"]) > 5:
+    if seconds(rows[0]["at"]) > 30:
         raise ValueError("Bản thu thiếu mốc đầu")
     return video_id, rows
 

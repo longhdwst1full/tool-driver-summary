@@ -4,7 +4,7 @@
 
 1. `drive_scan.py` dùng quyền Drive chỉ đọc để quét đúng thư mục gốc và các thư mục con. Kết quả là `scan.json` cùng `scan.md`; shortcut được liệt kê nhưng không truy theo.
 2. `output_layout.py` tạo đường dẫn kết quả từ cấu trúc thư mục, tên bài và tên video. Mọi phần đường dẫn được chuẩn hóa và kiểm tra trước khi ghi file. ID Drive vẫn dùng trong manifest để liên kết ổn định khi tên hiển thị thay đổi.
-3. `drive_process.py` tải 26 file phụ đề riêng đã phát hiện, phân tích mốc thời gian và lưu Markdown. `drive_documents.py` trích văn bản PDF, DOCX, PPTX, TXT; bỏ qua tài liệu quảng cáo Khóa học giá hời và đánh dấu PDF ảnh là `needs_ocr`.
+3. `drive_process.py` đọc file phụ đề riêng, phân tích mốc thời gian và lưu Markdown. `drive_documents.py` trích văn bản PDF, DOC/DOCX, PPT/PPTX, TXT, Markdown và Google Docs; bỏ qua tài liệu quảng cáo và file khóa tạm Office, đánh dấu PDF ảnh là `needs_ocr`.
 4. `codex_notes.py` tạo ghi chú AI từ phụ đề khi người dùng chạy lệnh hoặc chọn trên web. `study_pack.py` xây dựng chỉ mục mọi khóa học từ manifest và di chuyển các ghi chú mẫu cũ sang đường dẫn dễ đọc.
 5. `chunking.py` chia phụ đề theo cửa sổ 5–8 phút và tài liệu theo đoạn văn, mỗi đoạn có `chunk_id` cố định để trích dẫn. `llm_client.py` gom lời gọi Codex CLI (`CodexCLIClient`) và prompt có version (`Prompt`); `codex_notes.py` dùng lại lớp này.
 6. `lesson_pack.py` tạo gói bài học (tóm tắt, khái niệm, timeline, ghi chú chi tiết, cần nhớ, quiz) từ một phụ đề. Mỗi ý có `quote` nguyên văn; kiểm tra tự động đối chiếu quote với chunk, đo coverage, cho Codex sửa tối đa 2 lần rồi đánh dấu `needs_review`. Tài liệu đọc được trong cùng thư mục với video được thêm làm nguồn phụ (tối đa 12.000 ký tự); coverage chỉ tính trên phụ đề. Kết quả ở `drive-reports/lesson-packs/` dạng `.md` và `.json`, xem được trên web (tab Ghi chú hoặc chi tiết video).
@@ -17,21 +17,21 @@
 | Giai đoạn | Trạng thái |
 |---|---|
 | Demo phụ đề offline và kiểm kê Drive | Hoàn thành |
-| Trích phụ đề và tài liệu có văn bản | Hoàn thành |
+| Trích phụ đề và tài liệu có văn bản | Phụ đề hai nguồn mới đã xử lý; tài liệu nguồn thứ nhất còn chạy nền |
 | Giao diện quản lý cục bộ | Hoàn thành |
 | Tên kết quả theo khóa học/chương/bài, lọc tài liệu quảng cáo, chỉ mục toàn bộ thư mục | Hoàn thành |
 | Trạng thái nguồn của video (`caption_file` / `asr_ready` / `no_source`), chia đoạn, lớp LLM | Hoàn thành |
-| Gói bài học có dẫn nguồn và kiểm tra tự động | Hoàn thành 26/26 bài có phụ đề riêng; QA 26/26 `pass` |
+| Gói bài học có dẫn nguồn và kiểm tra tự động | Hoàn thành 26/26 bài của nguồn demo ban đầu; các video ở hai nguồn mới chưa được chạy AI hàng loạt |
 | Web duyệt theo khóa học/chương và xem Markdown | Hoàn thành |
 | Đối chiếu nhiều nguồn trong một bài | Đã có báo cáo có quote hai phía cho 4 bài có tài liệu đi kèm; các cờ mâu thuẫn cần người xem lại |
-| Tổng hợp nhiều bài thành kiến thức cấp khóa | Hoàn thành trên 26 bài QA `ok`; 118 khái niệm, 115 câu quiz |
+| Tổng hợp nhiều bài thành kiến thức cấp khóa | Hoàn thành trên 26 bài QA `ok` của nguồn demo ban đầu; cần chạy lại sau khi có thêm bài QA `ok` |
 | Trích văn bản PPTX | Đã triển khai; thư mục quét hiện không có PPTX để thử trực tiếp |
-| OCR cho PDF chứa ảnh | Đã triển khai và chạy trên 3 PDF ảnh; toàn bộ 33 tài liệu học đã đọc được |
+| OCR cho PDF chứa ảnh | Đã triển khai; nguồn thứ hai đã chạy OCR, nguồn thứ nhất chờ lượt đọc tài liệu hoàn tất |
 | Gói xuất NotebookLM | Đã xuất 29 tệp Markdown và link 2 tài liệu gốc; nhập lên NotebookLM do người dùng thực hiện |
 | Tìm kiếm và hỏi đáp có dẫn nguồn | Đã lập chỉ mục SQLite FTS5 với 79 đoạn nguồn và thử hỏi đáp có trích dẫn hợp lệ; backend MongoDB đã có code, chờ URI mới sau khi đổi mật khẩu |
-| ASR cho video tải được | Chưa triển khai; video trong thư mục hiện tại đều bị chủ sở hữu tắt quyền tải |
-| Transcript nhúng trong trình phát Drive và video không có file phụ đề riêng | Chưa được Drive API v3 cung cấp trực tiếp |
+| ASR cho video tải được | Chưa triển khai; cần kiểm tra quyền tải theo từng video trước khi chạy |
+| Transcript trong trình phát Drive | Đã thử thu qua trình duyệt trên nguồn demo; chưa thu hàng loạt hai nguồn mới, Drive API v3 không xuất trực tiếp bản chép lời giao diện |
 
 ## Dữ liệu và giới hạn
 
-`drive-reports/`, `.deps/`, `credentials.json` và `token.json` được `.gitignore` loại trừ. Không ghi vào Drive. Chỉ có 26/167 video có file phụ đề riêng; 141 video còn lại không có nguồn văn bản mà Drive API cho đọc, và chủ sở hữu tắt quyền tải. Không suy ra nội dung các video đó. OCR cho PDF ảnh chạy cục bộ, có thể sai chữ. QA tự động kiểm tra quote và độ phủ, còn tính đúng ngữ nghĩa cần xem lại với nguồn.
+`drive-reports/`, `.deps/`, `credentials.json` và `token.json` được `.gitignore` loại trừ. Không ghi vào Drive. Hai nguồn mới đã quét xong: nguồn thứ nhất có 67.562 video và 2.142 file phụ đề riêng (2.022 đọc được, 12 văn bản không mốc, 108 file trống); nguồn thứ hai có 24.200 video và 56 file phụ đề riêng (54 đọc được, 2 văn bản không mốc). File phụ đề không tự chứng minh video tương ứng đã có bài học AI; chỉ các bài có ghi chú và QA hợp lệ mới được tổng hợp. OCR cho PDF ảnh chạy cục bộ, có thể sai chữ. QA tự động kiểm tra quote và độ phủ, còn tính đúng ngữ nghĩa cần xem lại với nguồn.

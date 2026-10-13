@@ -5,13 +5,65 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from web_app import file_content, library, source_catalog, source_file_content
+from web_app import COURSE_SEARCH_CACHE, course_search, file_content, library, source_catalog, source_file_content, source_note_path
 from getsub_demo import format_time, parse_captions
 from import_ui_transcript import make_srt
 from output_layout import safe_segment
 
 
 class CourseWebTests(unittest.TestCase):
+    def test_source_ui_transcript_and_note_are_verified_before_display(self):
+        source_id = "1dFWmj2DQ8oSh4wN8gNLNz5amgAJ5HP7V"
+        video_id = "1VideoUiTranscript123"
+        rows = [{"at": "0:00", "text": "Mở đầu bài học."},
+                {"at": "0:06", "text": "Nội dung chính."}]
+        with TemporaryDirectory() as folder, patch("web_app.REPORTS", Path(folder)):
+            root = Path(folder) / "new-sources" / source_id
+            (root / "ui-transcripts").mkdir(parents=True)
+            video = {"id": video_id, "name": "Bài 1.mp4", "kind": "video", "parent_id": source_id,
+                     "path": "Khóa thử/Bài 1.mp4", "url": f"https://drive.google.com/file/d/{video_id}/view"}
+            scan = {"folder": {"id": source_id, "name": "Khóa thử"}, "items": [video]}
+            (root / "scan.json").write_text(json.dumps(scan), encoding="utf-8")
+            export = {"videoId": video_id, "source": "drive_ui", "url": video["url"],
+                      "atBottom": True, "startsNearZero": True, "rowCount": 2, "rows": rows}
+            (root / "ui-transcripts" / f"{video_id}.json").write_text(json.dumps(export), encoding="utf-8")
+            srt = make_srt(rows)
+            (root / "ui-transcripts" / f"{video_id}.srt").write_text(srt, encoding="utf-8")
+            cues = parse_captions(srt)
+            digest = sha256("\n".join(str((format_time(c.start_ms), format_time(c.end_ms), c.text))
+                                      for c in cues).encode()).hexdigest()
+            note_json = source_note_path(root, scan, video, ".json")
+            note_md = source_note_path(root, scan, video, ".md")
+            note_json.parent.mkdir(parents=True)
+            note_json.write_text(json.dumps({"caption_id": video_id, "source_kind": "drive_ui_transcript",
+                                             "source_sha256": digest,
+                                             "qa": {"status": "ok", "total_chunks": 1, "covered_chunks": 1}}), encoding="utf-8")
+            note_md.write_text("# Bài học đã kiểm tra\n", encoding="utf-8")
+            item = source_catalog(source_id, kind="video")["items"][0]
+            self.assertEqual(item["ui_transcript"]["row_count"], 2)
+            self.assertEqual(item["progressive_note"]["status"], "ok")
+            self.assertIn("Mở đầu", source_file_content(source_id, "ui_transcript", video_id)["content"])
+            self.assertIn("Bài học", source_file_content(source_id, "progressive_note", video_id)["content"])
+            export["atBottom"] = False
+            (root / "ui-transcripts" / f"{video_id}.json").write_text(json.dumps(export), encoding="utf-8")
+            self.assertIsNone(source_file_content(source_id, "ui_transcript", video_id))
+            self.assertIsNone(source_file_content(source_id, "progressive_note", video_id))
+
+    def test_course_search_includes_approved_sources_only(self):
+        source_id = "1dFWmj2DQ8oSh4wN8gNLNz5amgAJ5HP7V"
+        with TemporaryDirectory() as folder, patch("web_app.REPORTS", Path(folder)):
+            COURSE_SEARCH_CACHE.clear()
+            target = Path(folder) / "new-sources" / source_id
+            target.mkdir(parents=True)
+            (target / "scan.json").write_text(json.dumps({"folder": {"id": source_id, "name": "Khóa Product"},
+                "items": [{"id": "1FolderProduct123", "kind": "folder", "name": "Product Roadmap",
+                           "path": "Khóa Product/Product Roadmap"}]}), encoding="utf-8")
+            result = course_search("product")
+            self.assertEqual(result["total"], 2)
+            self.assertTrue(all(row["source_id"] == source_id for row in result["items"]))
+            self.assertIsNone(course_search("p"))
+            COURSE_SEARCH_CACHE.clear()
+
     def test_new_source_video_prefers_vietnamese_caption(self):
         source_id = "1pjNn2Wc_f5dLEfF023m5jvMEyF2s2fWj"
         video_id = "1VideoWithLanguages123"

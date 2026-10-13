@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Xem tài liệu · Drive Studio</title>
+  <link rel="stylesheet" href="/viewer.css">
+</head>
+<body>
+  <header class="viewer-header">
+    <div><span class="eyebrow">DRIVE STUDIO · TÀI LIỆU</span><h1 id="document-title">Đang tải tài liệu…</h1><p id="document-meta"></p></div>
+    <div class="viewer-actions"><a id="drive-link" target="_blank" rel="noopener noreferrer" hidden>Mở trên Drive ↗</a><button id="text-toggle" type="button">Ẩn văn bản</button></div>
+  </header>
+  <main class="viewer-layout">
+    <section class="original-pane" aria-label="Bản gốc trên Google Drive"><div class="pane-title">Bản gốc</div><iframe id="drive-frame" title="Xem bản gốc trên Google Drive" allow="fullscreen" referrerpolicy="no-referrer"></iframe><p>Đăng nhập Google trong trình duyệt để xem bản gốc nếu Drive yêu cầu.</p></section>
+    <section class="text-pane" id="text-pane" aria-label="Văn bản đã trích"><div class="pane-title">Nội dung đã trích <span id="document-type"></span></div><div id="document-content" class="document-content">Đang tải nội dung…</div></section>
+  </main>
+  <script src="/viewer.js" defer></script>
+</body>
+</html>

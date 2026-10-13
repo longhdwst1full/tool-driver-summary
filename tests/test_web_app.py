@@ -5,9 +5,21 @@ import unittest
 from unittest.mock import Mock, patch
 
 from web_app import Handler, command_for, document_type, file_content, library
+from web_auth import hash_password
 
 
 class WebAppTests(unittest.TestCase):
+    def test_remote_host_requires_login_configuration(self):
+        handler = object.__new__(Handler)
+        handler.headers = {"Host": "study.example.test"}
+        with patch.dict("os.environ", {"WEB_ALLOWED_HOSTS": "study.example.test",
+                                       "WEB_PASSWORD_HASH": ""}):
+            self.assertFalse(handler.allowed_host())
+        with patch.dict("os.environ", {"WEB_ALLOWED_HOSTS": "study.example.test",
+                                       "WEB_PASSWORD_HASH": hash_password("mat-khau-rieng-123",
+                                                                        bytes.fromhex("22" * 16))}):
+            self.assertTrue(handler.allowed_host())
+
     def test_closed_browser_connection_does_not_crash_response_handler(self):
         handler = object.__new__(Handler)
         handler.send_response = Mock()
@@ -95,6 +107,8 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(document_type("guide.pdf", "application/pdf"), "pdf")
         self.assertEqual(document_type("guide.docx"), "docx")
         self.assertEqual(document_type("slides.pptx"), "pptx")
+        self.assertEqual(document_type("workbook.xlsx"), "spreadsheet")
+        self.assertEqual(document_type("guide.html"), "html")
         self.assertEqual(document_type("readme.md", "text/plain"), "markdown")
         self.assertEqual(document_type("deploy.yml.txt", "text/plain"), "code")
         with TemporaryDirectory() as folder, patch("web_app.REPORTS", Path(folder)):

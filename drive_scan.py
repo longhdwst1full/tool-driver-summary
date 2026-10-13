@@ -21,7 +21,8 @@ SHORTCUT_MIME = "application/vnd.google-apps.shortcut"
 VIDEO_EXT = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 TRANSCRIPT_EXT = {".srt", ".vtt"}
 TEXT_EXT = {".txt", ".md"}
-DOCUMENT_EXT = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".odt", ".rtf"} | TEXT_EXT
+DOCUMENT_EXT = {".pdf", ".doc", ".docx", ".ppt", ".pptx", ".odt", ".rtf",
+                ".html", ".htm", ".xlsx", ".xlsm", ".xls"} | TEXT_EXT
 GOOGLE_DOCUMENT_MIME = {
     "application/vnd.google-apps.document",
     "application/vnd.google-apps.presentation",
